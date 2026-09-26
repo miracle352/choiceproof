@@ -1,6 +1,6 @@
-# Choiceproof
+# FAULTLINE
 
-Choiceproof is a public workbench for testing bounded AI decisions with OpenServ SERV Reasoning v2. A visitor defines one decision question, 2–5 allowed answers, and an input; Choiceproof forces the model to select within that answer set, validates the response on the server, and tests how the decision behaves under controlled challenges.
+FAULTLINE is a public workbench for testing bounded AI decisions with OpenServ SERV Reasoning v2. A visitor defines one decision question, 2–5 allowed answers, and an input; FAULTLINE forces the model to select within that answer set, validates the response on the server, and tests how the decision behaves under controlled challenges.
 
 ## What it shows
 
@@ -18,6 +18,8 @@ Choiceproof is a public workbench for testing bounded AI decisions with OpenServ
 - Every measured regression; a candidate is never described as fixed or safe merely because one case improves
 
 When no API key is configured, the app is deliberately read-only and labels all displayed output as sample data.
+
+The decision-path scene is driven by the real comparison state. Its silent video is lazy-loaded only on capable desktop devices; mobile, data-saver, coarse-pointer, and reduced-motion environments receive a static poster and CSS path treatment instead. The workbench remains the primary interaction and does not wait for the scene.
 
 ## Local setup
 

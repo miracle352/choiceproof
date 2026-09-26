@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { diffWordsWithSpace, type Change } from "diff";
+import type { PathSceneState } from "@/components/decision-path-scene";
 import type {
   ChallengeKind,
   ChallengeProposal,
@@ -12,6 +14,11 @@ import type {
   WorkspaceSnapshot,
 } from "@/lib/contracts";
 import { classifyChallengeReview, type LabelMapping } from "@/lib/domain";
+
+const DecisionPathScene = dynamic(
+  () => import("@/components/decision-path-scene").then((module) => module.DecisionPathScene),
+  { ssr: false, loading: () => <div className="path-scene path-scene-loading" aria-hidden="true" /> },
+);
 
 type WorkbenchProps = { liveConfigured: boolean; persistenceConfigured: boolean };
 
@@ -141,6 +148,7 @@ export function Workbench({ liveConfigured, persistenceConfigured }: WorkbenchPr
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const request = useMemo(() => ({ question: question.trim(), answers: answers.map((item) => item.trim()), input: originalInput.trim() }), [question, answers, originalInput]);
   const reviewStatus = compare ? classifyChallengeReview({
@@ -150,6 +158,27 @@ export function Workbench({ liveConfigured, persistenceConfigured }: WorkbenchPr
     meaningPreserved,
   }) : null;
   const removedAnswers = version ? version.answers.filter((answer) => !candidateAnswers.includes(answer)) : [];
+  const answersChanged = Boolean(compare && compare.original.selectedAnswer !== compare.challenged.selectedAnswer);
+  const sceneState: PathSceneState = !liveConfigured
+    ? "sample"
+    : error
+      ? "failed"
+      : reviewStatus === "VERIFIED_FAILURE"
+        ? "verified"
+        : compare
+          ? answersChanged ? "changed" : "stable"
+          : "idle";
+  const busyLabel = busy === "quick" || busy === "propose"
+    ? "SERV is generating bounded challenge inputs…"
+    : busy === "compare"
+      ? "Running the original and challenged inputs…"
+      : busy === "save"
+        ? "Saving the labeled case…"
+        : busy === "suggest"
+          ? "SERV is drafting a revision candidate…"
+          : busy === "evaluate"
+            ? "Rerunning labeled and held-out cases…"
+            : "";
 
   useEffect(() => {
     if (!persistenceConfigured) return;
@@ -209,8 +238,39 @@ export function Workbench({ liveConfigured, persistenceConfigured }: WorkbenchPr
       setMeaningPreserved(null);
       setCandidateQuestion(data.version.question);
       setCandidateAnswers(data.version.answers);
+      requestAnimationFrame(() => resultHeadingRef.current?.focus());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Comparison failed.");
+    } finally { setBusy(null); }
+  }
+
+  async function runQuickChallenge() {
+    setBusy("quick"); setError(null); setEvaluation(null);
+    try {
+      const proposalData = await postJson<{ challenges: ChallengeProposal[] }>("/api/challenges", request);
+      const selected = proposalData.challenges.find((item) => item.kind === "conflicting_evidence") ?? proposalData.challenges[0];
+      setProposals(proposalData.challenges);
+      setChallengeKind(selected.kind);
+      setChallengeInput(selected.input);
+      setBusy("compare");
+      const data = await postJson<CompareResult>("/api/compare", {
+        nodeId,
+        question: request.question,
+        answers: request.answers,
+        originalInput: request.input,
+        challengeInput: selected.input,
+        challengeKind: selected.kind,
+      });
+      setCompare(data);
+      setNodeId(data.nodeId);
+      setVersion(data.version);
+      setExpectedAnswer("");
+      setMeaningPreserved(null);
+      setCandidateQuestion(data.version.question);
+      setCandidateAnswers(data.version.answers);
+      requestAnimationFrame(() => resultHeadingRef.current?.focus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Live challenge failed.");
     } finally { setBusy(null); }
   }
 
@@ -274,101 +334,131 @@ export function Workbench({ liveConfigured, persistenceConfigured }: WorkbenchPr
   const shownOriginal = compare?.original ?? (!liveConfigured ? SAMPLE : null);
 
   return (
-    <main>
+    <>
+      <a className="skip-link" href="#workbench">Skip to workbench</a>
       <header className="topbar">
-        <a className="brand" href="#decision"><span className="brand-mark">CP</span><span>CHOICEPROOF</span></a>
+        <a className="brand" href="#workbench" aria-label="Faultline home"><span className="brand-mark">F</span><span>FAULTLINE</span></a>
+        <nav className="topnav" aria-label="Workbench sections">
+          <a href="#workbench">Run</a><a href="#matrix">Matrix</a><a href="#revision">Revision</a>
+        </nav>
         <div className="status-cluster">
-          <span className="mode-cluster"><i className={`status-dot ${liveConfigured ? "is-live" : "is-sample"}`} />{liveConfigured ? "SERV LIVE" : "SAMPLE MODE"}</span>
-          <span className="mode-cluster"><i className={`status-dot ${persistenceConfigured ? "is-live" : "is-sample"}`} />{persistenceConfigured ? "DATABASE READY" : "NO DATABASE"}</span>
+          <span className={`system-badge ${liveConfigured ? "badge-live" : "badge-sample"}`}><i />{liveConfigured ? "LIVE" : "SAMPLE"}</span>
+          <span className={`system-badge ${persistenceConfigured ? "badge-ready" : "badge-failed"}`}><i />{persistenceConfigured ? "PRIVATE DB" : "NO DB"}</span>
         </div>
       </header>
 
-      <section className="intro compact-intro">
-        <div><p className="eyebrow">BOUNDED DECISION WORKBENCH</p><h1>Challenge the boundary.<br />Measure what moves.</h1></div>
-        <p className="intro-copy">Run the same decision against deliberate input variations. A changed answer starts a review; only your labels can turn it into a verified result.</p>
-      </section>
+      <main id="main-content">
+        <section className="product-hero" aria-labelledby="page-title">
+          <div className="hero-copy">
+            <p className="eyebrow">OPEN DECISION TESTING / SERV REASONING</p>
+            <h1 id="page-title">Find where a decision breaks.</h1>
+            <p>Run one bounded decision across controlled input changes. See the exact fault line, label the outcome, and test the next version.</p>
+            <ol className="flow-strip" aria-label="Sixty-second workflow">
+              <li><b>01</b>Edit input</li><li><b>02</b>Run challenge</li><li><b>03</b>Review change</li><li><b>04</b>Rerun revision</li>
+            </ol>
+          </div>
+          <DecisionPathScene state={sceneState} originalAnswer={compare?.original.selectedAnswer} challengedAnswer={compare?.challenged.selectedAnswer} />
+        </section>
 
-      {(!liveConfigured || !persistenceConfigured) && (
-        <aside className="sample-banner" role="status">
-          <strong>{!liveConfigured ? "Read-only sample — not a live run." : "Persistence setup required."}</strong>
-          <span>{!liveConfigured && !persistenceConfigured
-            ? "Add SERV_API_KEY and DATABASE_URL on the server to enable the live workflow."
-            : !liveConfigured
-              ? "Add SERV_API_KEY on the server to enable live decisions."
-              : "Connect DATABASE_URL before running or saving cases."}</span>
-        </aside>
-      )}
+        {(!liveConfigured || !persistenceConfigured) && (
+          <aside className="sample-banner" role="status">
+            <strong>{!liveConfigured ? "SAMPLE — READ ONLY, NOT A LIVE RUN" : "PERSISTENCE UNAVAILABLE"}</strong>
+            <span>{!liveConfigured && !persistenceConfigured
+              ? "Configure SERV_API_KEY and DATABASE_URL to enable live tests."
+              : !liveConfigured
+                ? "Configure SERV_API_KEY to enable live decisions."
+                : "Configure DATABASE_URL before running or saving cases."}</span>
+          </aside>
+        )}
 
-      <section className="stage" id="decision">
-        <div className="stage-title"><span>01</span><div><h2>Decision specification</h2><p>Every run is constrained to this answer set.</p></div></div>
-        <div className="decision-grid">
-          <div className="form-stack">
-            <label className="field-label" htmlFor="question">Decision question</label>
-            <textarea id="question" rows={3} value={question} onChange={(event) => setQuestion(event.target.value)} disabled={!liveConfigured || Boolean(busy)} />
-            <div className="field-row"><span className="field-label">Allowed answers</span><span className="field-count">{answers.length}/5</span></div>
-            <div className="answers-list">
-              {answers.map((answer, index) => <div className="answer-row" key={index}><span>{String(index + 1).padStart(2, "0")}</span><input aria-label={`Allowed answer ${index + 1}`} value={answer} onChange={(event) => updateAnswer(index, event.target.value)} disabled={!liveConfigured || Boolean(busy)} /><button type="button" onClick={() => answers.length > 2 && setAnswers((current) => current.filter((_, i) => i !== index))} disabled={answers.length <= 2 || Boolean(busy)}>×</button></div>)}
+        <section className="workbench-shell" id="workbench" aria-labelledby="workbench-title" aria-busy={Boolean(busy)}>
+          <div className="workbench-heading">
+            <div><span className="section-index">01</span><div><p className="kicker">PRIMARY WORKBENCH</p><h2 id="workbench-title">Run a live challenge</h2></div></div>
+            <span className="version-chip">{version ? `DECISION V${version.versionNumber}` : "UNSAVED DECISION"}</span>
+          </div>
+
+          <div className="run-grid">
+            <div className="input-column">
+              <label className="field-label" htmlFor="original">Input to test</label>
+              <textarea className="mono-area primary-input" id="original" rows={7} value={originalInput} onChange={(event) => { setOriginalInput(event.target.value); if (challengeKind === "manual") setChallengeInput(event.target.value); }} disabled={!liveConfigured || Boolean(busy)} />
+              <div className="input-meta"><span>Replace every field if needed</span><span>Private to this browser owner</span></div>
+              <div className="primary-actions">
+                <button className="run-button quick-run" type="button" onClick={runQuickChallenge} disabled={interactionDisabled || !originalInput.trim()}>
+                  <span>{busy === "quick" ? "GENERATING CHALLENGE…" : busy === "compare" ? "RUNNING BOTH INPUTS…" : "RUN LIVE CHALLENGE"}</span><span aria-hidden="true">↗</span>
+                </button>
+                <button className="outline-button" type="button" onClick={generateChallenges} disabled={interactionDisabled}>{busy === "propose" ? "GENERATING…" : "CHOOSE CHALLENGE"}</button>
+              </div>
             </div>
-            {answers.length < 5 && <button className="text-button" type="button" onClick={() => setAnswers((current) => [...current, ""])} disabled={interactionDisabled}>+ Add answer</button>}
+
+            <details className="decision-config">
+              <summary><span>Decision boundary</span><strong>{answers.length} allowed answers</strong></summary>
+              <div className="config-body">
+                <label className="field-label" htmlFor="question">Decision question</label>
+                <textarea id="question" rows={3} value={question} onChange={(event) => setQuestion(event.target.value)} disabled={!liveConfigured || Boolean(busy)} />
+                <div className="field-row"><span className="field-label">Allowed answers</span><span className="field-count">{answers.length}/5</span></div>
+                <div className="answers-list">
+                  {answers.map((answer, index) => <div className="answer-row" key={index}><span>{String(index + 1).padStart(2, "0")}</span><input aria-label={`Allowed answer ${index + 1}`} value={answer} onChange={(event) => updateAnswer(index, event.target.value)} disabled={!liveConfigured || Boolean(busy)} /><button type="button" aria-label={`Remove answer ${answer || index + 1}`} onClick={() => answers.length > 2 && setAnswers((current) => current.filter((_, i) => i !== index))} disabled={answers.length <= 2 || Boolean(busy)}>×</button></div>)}
+                </div>
+                {answers.length < 5 && <button className="text-button" type="button" onClick={() => setAnswers((current) => [...current, ""])} disabled={interactionDisabled}>+ Add answer</button>}
+              </div>
+            </details>
           </div>
-          <div>
-            <label className="field-label" htmlFor="original">Original input</label>
-            <textarea className="mono-area" id="original" rows={12} value={originalInput} onChange={(event) => { setOriginalInput(event.target.value); if (challengeKind === "manual") setChallengeInput(event.target.value); }} disabled={!liveConfigured || Boolean(busy)} />
-            <p className="privacy-note">Private by default. Inputs are stored only for your anonymous browser owner and are never listed publicly.</p>
+
+          {busyLabel && <div className="operation-status" role="status" aria-live="polite"><i className="spinner" aria-hidden="true" /><span>{busyLabel}</span><small>Live progress only — no simulated steps.</small></div>}
+
+          {error && <div className="run-error" role="alert"><span className="run-label run-label-failed">FAILED</span><div><strong>The run did not complete.</strong><p>{error}</p></div></div>}
+
+          {proposals.length > 0 && <div className="challenge-lab">
+            <div className="challenge-lab-head"><div><p className="kicker">CHALLENGE SET</p><h3>Choose or edit the perturbation</h3></div><button className="text-button" type="button" onClick={() => { setChallengeKind("manual"); setChallengeInput(originalInput); }}>Write manually</button></div>
+            <div className="proposal-tabs" role="tablist" aria-label="Generated challenges">{proposals.map((proposal) => <button role="tab" aria-selected={challengeKind === proposal.kind} className={challengeKind === proposal.kind ? "active" : ""} key={proposal.kind} onClick={() => { setChallengeKind(proposal.kind); setChallengeInput(proposal.input); }}><span>{KIND_LABELS[proposal.kind]}</span><small>{proposal.label}</small></button>)}</div>
+            <label className="field-label" htmlFor="challenge-input">Challenged input · {KIND_LABELS[challengeKind]}</label>
+            <textarea className="mono-area" id="challenge-input" rows={6} value={challengeInput} onChange={(event) => { setChallengeKind("manual"); setChallengeInput(event.target.value); }} disabled={!liveConfigured || Boolean(busy)} />
+            <button className="run-button compact-run" type="button" onClick={runComparison} disabled={interactionDisabled || challengeInput.trim() === originalInput.trim()}><span>{busy === "compare" ? "RUNNING BOTH INPUTS…" : "RUN THIS CHALLENGE"}</span><span aria-hidden="true">↗</span></button>
+          </div>}
+        </section>
+
+        {(compare || shownOriginal) && <section className="result-stage" aria-labelledby="result-title">
+          <div className="result-heading"><div><span className="section-index">02</span><div><p className="kicker">MEASURED OUTPUT</p><h2 id="result-title" ref={resultHeadingRef} tabIndex={-1}>Comparison result</h2></div></div><span className={`run-label ${compare ? "run-label-live" : "run-label-sample"}`}>{compare ? "LIVE RUN" : "SAMPLE"}</span></div>
+          {compare ? <>
+            <div className={`answer-banner ${answersChanged ? "answer-banner-changed" : "answer-banner-stable"}`}><span>{answersChanged ? "ANSWER CHANGED" : "ANSWER STABLE"}</span><strong>{compare.original.selectedAnswer}<i aria-hidden="true">→</i>{compare.challenged.selectedAnswer}</strong></div>
+            <DiffView before={originalInput} after={challengeInput} />
+            <div className="result-pair"><RawResult title="ORIGINAL" result={compare.original} /><RawResult title="CHALLENGED" result={compare.challenged} /></div>
+            <div className={`review-status status-${reviewStatus?.toLowerCase().replaceAll("_", "-")}`}>
+              <span>REVIEW STATUS</span><strong>{reviewStatus?.replaceAll("_", " ")}</strong>
+              {reviewStatus === "ANSWER_CHANGED_REVIEW_NEEDED" && <p>A changed answer is a signal, not a verified error. Set the expected answer and meaning judgment before classification.</p>}
+            </div>
+            <div className="label-panel">
+              <div><label className="field-label" htmlFor="expected">Expected answer</label><select id="expected" value={expectedAnswer} onChange={(event) => setExpectedAnswer(event.target.value)}><option value="">Choose explicitly…</option>{compare.version.answers.map((answer) => <option key={answer}>{answer}</option>)}</select></div>
+              <fieldset><legend className="field-label">Same meaning?</legend><div className="segmented"><button type="button" aria-pressed={meaningPreserved === true} className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Yes</button><button type="button" aria-pressed={meaningPreserved === false} className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>No</button></div></fieldset>
+              <div><label className="field-label" htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled</option><option value="held_out">Held-out</option></select></div>
+              <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || meaningPreserved == null || Boolean(busy)}>{busy === "save" ? "SAVING…" : "SAVE CASE"}</button>
+            </div>
+          </> : <div className="sample-result"><span>SAMPLE — NOT LIVE</span><strong>{shownOriginal?.selectedAnswer}</strong><p>Illustrative output only. No request was sent to SERV.</p></div>}
+        </section>}
+
+        <section className="matrix-stage" id="matrix" aria-labelledby="matrix-title">
+          <div className="section-heading"><div><span className="section-index">03</span><div><p className="kicker">PRIVATE TEST MATRIX</p><h2 id="matrix-title">Cases that must keep passing</h2></div></div><p>{cases.length} saved · held-out cases stay out of revision prompts</p></div>
+          {cases.length ? <div className="test-matrix" role="table" aria-label="Saved decision cases"><div className="matrix-row matrix-head" role="row"><span>SET</span><span>PERTURBATION</span><span>EXPECTED</span><span>ORIGINAL</span><span>CHALLENGE</span><span>VERDICT</span></div>{cases.map((item) => <div className="matrix-row" role="row" key={item.id}><span><b className={`set-pill ${item.setKind}`}>{item.setKind.replace("_", " ")}</b></span><span data-label="Perturbation">{KIND_LABELS[item.challengeKind]}</span><span data-label="Expected">{item.expectedAnswer}</span><span data-label="Original">{item.originalAnswer}</span><span data-label="Challenge">{item.challengedAnswer}</span><span data-label="Verdict"><b className={`verdict-pill verdict-${item.status.toLowerCase().replaceAll("_", "-")}`}>{item.status.replaceAll("_", " ")}</b></span></div>)}</div> : <div className="empty-box">Your first reviewed challenge will appear here.</div>}
+        </section>
+
+        <section className="revision-stage" id="revision" aria-labelledby="revision-title">
+          <div className="section-heading"><div><span className="section-index">04</span><div><p className="kicker">VERSION COMPARISON</p><h2 id="revision-title">Test the next decision</h2></div></div><button className="outline-button" type="button" onClick={suggestRevision} disabled={interactionDisabled || !cases.some((item) => item.setKind === "labeled" && item.meaningPreserved)}>{busy === "suggest" ? "SUGGESTING…" : "ASK SERV FOR CANDIDATE"}</button></div>
+          <div className="version-comparison">
+            <article><header><span>BASELINE</span><b>V{version?.versionNumber ?? 1}</b></header><p>{version?.question ?? question}</p><ul>{(version?.answers ?? answers).map((answer) => <li key={answer}>{answer}</li>)}</ul></article>
+            <div className="version-divider" aria-hidden="true"><span>→</span></div>
+            <article className="candidate-version"><header><span>{candidateSource === "serv" ? "SERV CANDIDATE" : "EDITED CANDIDATE"}</span><b>V{evaluation?.candidateVersion.versionNumber ?? (version?.versionNumber ?? 1) + 1}</b></header><label className="field-label" htmlFor="candidate-question">Candidate question</label><textarea id="candidate-question" rows={4} value={candidateQuestion} onChange={(event) => { setCandidateSource("user"); setCandidateQuestion(event.target.value); }} /><span className="field-label">Candidate answers</span><div className="answers-list">{candidateAnswers.map((answer, index) => <div className="answer-row" key={index}><span>{String(index + 1).padStart(2, "0")}</span><input aria-label={`Candidate answer ${index + 1}`} value={answer} onChange={(event) => { setCandidateSource("user"); setCandidateAnswers((current) => current.map((item, i) => i === index ? event.target.value : item)); }} /><button type="button" aria-label={`Remove candidate answer ${answer || index + 1}`} disabled={candidateAnswers.length <= 2} onClick={() => setCandidateAnswers((current) => current.filter((_, i) => i !== index))}>×</button></div>)}</div>{candidateAnswers.length < 5 && <button className="text-button" type="button" onClick={() => setCandidateAnswers((current) => [...current, ""])}>+ Add candidate answer</button>}</article>
           </div>
-        </div>
-      </section>
+          {removedAnswers.length > 0 && <div className="mapping-panel"><h3>Explicit label mapping required</h3><p>Cases using removed labels remain <strong>NEEDS RELABELING</strong> until mapped.</p>{removedAnswers.map((oldAnswer) => <label key={oldAnswer}><span>{oldAnswer}</span><select aria-label={`Map removed label ${oldAnswer}`} value={labelMapping[oldAnswer] ?? ""} onChange={(event) => setLabelMapping((current) => ({ ...current, [oldAnswer]: event.target.value || null }))}><option value="">Needs relabeling</option>{candidateAnswers.filter(Boolean).map((answer) => <option key={answer}>{answer}</option>)}</select></label>)}</div>}
+          <button className="run-button evaluate-button" type="button" onClick={evaluateRevision} disabled={interactionDisabled || cases.length === 0}><span>{busy === "evaluate" ? "RERUNNING ALL CASES…" : "RERUN MATRIX AGAINST CANDIDATE"}</span><span aria-hidden="true">↗</span></button>
 
-      <section className="stage challenge-stage" id="challenge">
-        <div className="stage-title"><span>02</span><div><h2>Challenge input</h2><p>Ask SERV for five varied tests, choose one, or write your own.</p></div><button className="outline-button" onClick={generateChallenges} disabled={interactionDisabled}>{busy === "propose" ? "GENERATING…" : "GENERATE 5 CHALLENGES"}</button></div>
-        {proposals.length > 0 && <div className="proposal-tabs" role="list">{proposals.map((proposal) => <button className={challengeKind === proposal.kind ? "active" : ""} key={proposal.kind} onClick={() => { setChallengeKind(proposal.kind); setChallengeInput(proposal.input); }}><span>{KIND_LABELS[proposal.kind]}</span><small>{proposal.label}</small></button>)}</div>}
-        <div className="challenge-editor">
-          <div className="challenge-editor-head"><span className="field-label">{KIND_LABELS[challengeKind]}</span><button className="text-button" onClick={() => { setChallengeKind("manual"); setChallengeInput(originalInput); }}>Write manually</button></div>
-          <textarea className="mono-area" rows={8} value={challengeInput} onChange={(event) => { setChallengeKind("manual"); setChallengeInput(event.target.value); }} disabled={!liveConfigured || Boolean(busy)} />
-          <button className="run-button" onClick={runComparison} disabled={interactionDisabled || challengeInput.trim() === originalInput.trim()}><span>{busy === "compare" ? "RUNNING BOTH INPUTS…" : "RUN ORIGINAL + CHALLENGE"}</span><span>↗</span></button>
-        </div>
-        {error && <p className="error-message" role="alert">{error}</p>}
-      </section>
+          {evaluation && <div className="evaluation-report">
+            <div className={`evaluation-summary ${evaluation.summary.regressions ? "has-regression" : "no-regression"}`}><span>MEASURED RESULT · VERSION {evaluation.candidateVersion.versionNumber}</span><strong>{evaluation.summary.regressions ? `${evaluation.summary.regressions} REGRESSION${evaluation.summary.regressions === 1 ? "" : "S"} DETECTED` : "NO MEASURED REGRESSIONS IN THIS TEST SET"}</strong><p>{evaluation.summary.evaluated} evaluated · {evaluation.summary.needsRelabeling} needs relabeling. This is not a global safety claim.</p></div>
+            <div className="evaluation-groups">{(["labeled", "held_out"] as const).map((kind) => <section key={kind}><h3>{kind === "labeled" ? "Labeled cases" : "Held-out set"}</h3>{evaluation.results.filter((item) => item.setKind === kind).map((item) => <article className={`evaluation-row verdict-${item.verdict?.toLowerCase() ?? "relabel"}`} key={item.caseId}><span>{item.status === "NEEDS_RELABELING" ? "NEEDS RELABELING" : item.verdict?.replaceAll("_", " ")}</span>{item.status === "EVALUATED" && <strong>{item.baselineAnswer} → {item.candidateAnswer} <small>expected {item.expectedAnswer}</small></strong>}</article>)}</section>)}</div>
+          </div>}
+        </section>
 
-      {(compare || shownOriginal) && <section className="stage result-stage">
-        <div className="stage-title"><span>03</span><div><h2>Measured result</h2><p>Exact input change and unmodified provider responses.</p></div></div>
-        {compare ? <>
-          <DiffView before={originalInput} after={challengeInput} />
-          <div className="result-pair"><RawResult title="ORIGINAL" result={compare.original} /><RawResult title="CHALLENGED" result={compare.challenged} /></div>
-          <div className={`review-status status-${reviewStatus?.toLowerCase().replaceAll("_", "-")}`}>
-            <span>REVIEW STATUS</span><strong>{reviewStatus?.replaceAll("_", " ")}</strong>
-            {reviewStatus === "ANSWER_CHANGED_REVIEW_NEEDED" && <p>A changed answer is a signal, not a verified error. Label the expected answer and semantic equivalence below.</p>}
-          </div>
-          <div className="label-panel">
-            <div><label className="field-label" htmlFor="expected">Expected answer</label><select id="expected" value={expectedAnswer} onChange={(event) => setExpectedAnswer(event.target.value)}><option value="">Choose explicitly…</option>{compare.version.answers.map((answer) => <option key={answer}>{answer}</option>)}</select></div>
-            <fieldset><legend className="field-label">Does the challenge preserve the original meaning?</legend><div className="segmented"><button type="button" className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Yes</button><button type="button" className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>No</button></div></fieldset>
-            <div><label className="field-label" htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled / revision input</option><option value="held_out">Held-out / evaluation only</option></select></div>
-            <button className="save-button" onClick={saveLabeledCase} disabled={!expectedAnswer || meaningPreserved == null || Boolean(busy)}>{busy === "save" ? "SAVING…" : "SAVE LABELED CASE"}</button>
-          </div>
-        </> : <div className="sample-result"><span>SAMPLE ONLY</span><strong>{shownOriginal?.selectedAnswer}</strong><p>This output is illustrative and was not returned by a live request.</p></div>}
-      </section>}
-
-      <section className="stage case-stage">
-        <div className="stage-title"><span>04</span><div><h2>Case library</h2><p>{cases.length} private case{cases.length === 1 ? "" : "s"}; held-out cases are excluded from SERV revision suggestions.</p></div></div>
-        {cases.length ? <div className="case-table" role="table"><div className="case-table-row case-table-head" role="row"><span>SET</span><span>CHALLENGE</span><span>EXPECTED</span><span>CLASSIFICATION</span></div>{cases.map((item) => <div className="case-table-row" role="row" key={item.id}><span><b className={`set-pill ${item.setKind}`}>{item.setKind.replace("_", " ")}</b></span><span>{KIND_LABELS[item.challengeKind]}</span><span>{item.expectedAnswer}</span><span>{item.status.replaceAll("_", " ")}</span></div>)}</div> : <div className="empty-box">No labeled cases yet. Run and review a challenge to create the first one.</div>}
-      </section>
-
-      <section className="stage revision-stage">
-        <div className="stage-title"><span>05</span><div><h2>Revision candidate</h2><p>Write a candidate or ask SERV. Nothing is called fixed; every case is rerun.</p></div><button className="outline-button" onClick={suggestRevision} disabled={interactionDisabled || !cases.some((item) => item.setKind === "labeled" && item.meaningPreserved)}>{busy === "suggest" ? "SUGGESTING…" : "ASK SERV FOR CANDIDATE"}</button></div>
-        <div className="revision-grid">
-          <div><label className="field-label" htmlFor="candidate-question">Candidate question</label><textarea id="candidate-question" rows={4} value={candidateQuestion} onChange={(event) => { setCandidateSource("user"); setCandidateQuestion(event.target.value); }} /></div>
-          <div><span className="field-label">Candidate answers</span><div className="answers-list">{candidateAnswers.map((answer, index) => <div className="answer-row" key={index}><span>{String(index + 1).padStart(2, "0")}</span><input aria-label={`Candidate answer ${index + 1}`} value={answer} onChange={(event) => { setCandidateSource("user"); setCandidateAnswers((current) => current.map((item, i) => i === index ? event.target.value : item)); }} /><button type="button" disabled={candidateAnswers.length <= 2} onClick={() => setCandidateAnswers((current) => current.filter((_, i) => i !== index))}>×</button></div>)}</div>{candidateAnswers.length < 5 && <button className="text-button" onClick={() => setCandidateAnswers((current) => [...current, ""])}>+ Add candidate answer</button>}</div>
-        </div>
-        {removedAnswers.length > 0 && <div className="mapping-panel"><h3>Explicit label mapping required</h3><p>Cases using removed labels stay <strong>NEEDS RELABELING</strong> until mapped.</p>{removedAnswers.map((oldAnswer) => <label key={oldAnswer}><span>{oldAnswer}</span><select value={labelMapping[oldAnswer] ?? ""} onChange={(event) => setLabelMapping((current) => ({ ...current, [oldAnswer]: event.target.value || null }))}><option value="">Needs relabeling</option>{candidateAnswers.filter(Boolean).map((answer) => <option key={answer}>{answer}</option>)}</select></label>)}</div>}
-        <button className="run-button evaluate-button" onClick={evaluateRevision} disabled={interactionDisabled || cases.length === 0}><span>{busy === "evaluate" ? "RERUNNING ALL CASES…" : "EVALUATE CANDIDATE ON BOTH SETS"}</span><span>↗</span></button>
-
-        {evaluation && <div className="evaluation-report">
-          <div className={`evaluation-summary ${evaluation.summary.regressions ? "has-regression" : "no-regression"}`}><span>MEASURED RESULT · VERSION {evaluation.candidateVersion.versionNumber}</span><strong>{evaluation.summary.regressions ? `${evaluation.summary.regressions} REGRESSION${evaluation.summary.regressions === 1 ? "" : "S"} DETECTED` : "NO MEASURED REGRESSIONS IN THIS TEST SET"}</strong><p>{evaluation.summary.evaluated} evaluated · {evaluation.summary.needsRelabeling} needs relabeling. This is not a global safety claim.</p></div>
-          <div className="evaluation-groups">{(["labeled", "held_out"] as const).map((kind) => <section key={kind}><h3>{kind === "labeled" ? "Labeled cases" : "Held-out set"}</h3>{evaluation.results.filter((item) => item.setKind === kind).map((item) => <article className={`evaluation-row verdict-${item.verdict?.toLowerCase() ?? "relabel"}`} key={item.caseId}><span>{item.status === "NEEDS_RELABELING" ? "NEEDS RELABELING" : item.verdict?.replaceAll("_", " ")}</span>{item.status === "EVALUATED" && <strong>{item.baselineAnswer} → {item.candidateAnswer} <small>expected {item.expectedAnswer}</small></strong>}</article>)}</section>)}</div>
-        </div>}
-      </section>
-
-      <footer><span>CHOICEPROOF / OPEN TRACK 2026</span><span>SERV REASONING V2 · PRIVATE CASES</span></footer>
-    </main>
+        <footer><span>FAULTLINE / OPEN TRACK 2026</span><span>SERV REASONING V2 · PRIVATE BY DEFAULT</span></footer>
+      </main>
+    </>
   );
 }
