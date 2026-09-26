@@ -3,9 +3,10 @@ import "server-only";
 import { randomBytes, randomUUID } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { stableCaseId } from "@/lib/case-id";
-import type { DecisionSuccess, DecisionVersion, PersistedCase, WorkspaceSnapshot } from "@/lib/contracts";
+import type { DecisionSuccess, DecisionVersion, JevAnalysis, PersistedCase, WorkspaceSnapshot } from "@/lib/contracts";
 import type { ChallengeKind, DecisionRequest } from "@/lib/contracts";
 import type { CaseSet, LabelMapping, ReviewClassification } from "@/lib/domain";
+import { isCompletePublishedEvidence, type PublicComparison, type PublishedEvidence } from "@/lib/public-evidence";
 
 let schemaPromise: Promise<void> | null = null;
 
@@ -99,6 +100,17 @@ async function ensureSchema() {
         id text PRIMARY KEY, owner_hash text NOT NULL, public_payload jsonb NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL
       )`);
+      await sql.query(`CREATE TABLE IF NOT EXISTS cp_jev_analyses (
+        id text PRIMARY KEY, node_id text NOT NULL REFERENCES cp_nodes(id) ON DELETE CASCADE,
+        version_id text NOT NULL REFERENCES cp_versions(id) ON DELETE CASCADE,
+        original_run_id text NOT NULL REFERENCES cp_runs(id) ON DELETE CASCADE,
+        challenged_run_id text NOT NULL REFERENCES cp_runs(id) ON DELETE CASCADE,
+        observed_behavior text NOT NULL, apparent_relevance text NOT NULL, review_priority text NOT NULL,
+        model text NOT NULL, latency_ms integer NOT NULL, raw_response jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (original_run_id, challenged_run_id)
+      )`);
+      await sql.query("CREATE INDEX IF NOT EXISTS cp_published_results_created_idx ON cp_published_results (created_at DESC)");
     })().catch((error) => {
       schemaPromise = null;
       throw classifyDatabaseError(error);
@@ -378,29 +390,44 @@ export async function getOwnedMeasuredComparison(input: {
   };
 }
 
-export type PublicComparison = {
-  question: string;
-  answers: string[];
-  originalInput: string;
-  challengeInput: string;
-  original: { selectedAnswer: string; model: string; provider: string | null; latencyMs: number };
-  challenged: { selectedAnswer: string; model: string; provider: string | null; latencyMs: number };
-  expectedAnswer: string;
-  meaningPreserved: boolean;
-  challengeIntent: "preserve" | "change" | null;
-  classification: string;
-  challengeKind: string;
-};
+export async function saveJevAnalysis(input: {
+  nodeId: string;
+  versionId: string;
+  originalRunId: string;
+  challengedRunId: string;
+  analysis: JevAnalysis;
+}) {
+  await ensureSchema();
+  await client().query(
+    `INSERT INTO cp_jev_analyses
+      (id, node_id, version_id, original_run_id, challenged_run_id, observed_behavior, apparent_relevance, review_priority, model, latency_ms, raw_response)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+     ON CONFLICT (original_run_id, challenged_run_id) DO UPDATE SET
+       observed_behavior = EXCLUDED.observed_behavior,
+       apparent_relevance = EXCLUDED.apparent_relevance,
+       review_priority = EXCLUDED.review_priority,
+       model = EXCLUDED.model,
+       latency_ms = EXCLUDED.latency_ms,
+       raw_response = EXCLUDED.raw_response,
+       created_at = now()`,
+    [randomUUID(), input.nodeId, input.versionId, input.originalRunId, input.challengedRunId,
+      input.analysis.observedBehavior, input.analysis.apparentRelevance, input.analysis.reviewPriority,
+      input.analysis.model, input.analysis.latencyMs, JSON.stringify(input.analysis.raw)],
+  );
+}
 
 export async function publishOwnedCase(input: { ownerHash: string; caseId: string }) {
   await ensureSchema();
   const rows = await client().query(
-    `SELECT c.expected_answer, c.meaning_preserved, c.challenge_intent, c.status, c.challenge_kind,
+    `SELECT c.expected_answer, c.meaning_preserved, c.challenge_intent, c.status, c.challenge_kind, c.set_kind,
+       c.created_at AS case_created_at, c.original_run_id, c.challenged_run_id,
        v.question, v.answers,
        original.input_text AS original_input, original.selected_answer AS original_answer,
        original.model AS original_model, original.provider AS original_provider, original.latency_ms AS original_latency_ms,
+       original.created_at AS original_created_at,
        challenged.input_text AS challenge_input, challenged.selected_answer AS challenged_answer,
-       challenged.model AS challenged_model, challenged.provider AS challenged_provider, challenged.latency_ms AS challenged_latency_ms
+       challenged.model AS challenged_model, challenged.provider AS challenged_provider, challenged.latency_ms AS challenged_latency_ms,
+       challenged.created_at AS challenged_created_at
      FROM cp_cases c
      JOIN cp_nodes n ON n.id = c.node_id AND n.owner_hash = $1
      JOIN cp_versions v ON v.id = c.source_version_id
@@ -411,7 +438,16 @@ export async function publishOwnedCase(input: { ownerHash: string; caseId: strin
   ) as Array<Record<string, unknown>>;
   const row = rows[0];
   if (!row) throw new Error("CASE_NOT_FOUND");
+  if (row.set_kind === "held_out") throw new Error("HELD_OUT_PUBLICATION_FORBIDDEN");
+  const analyses = await client().query(
+    `SELECT observed_behavior, apparent_relevance, review_priority, model, latency_ms, created_at
+     FROM cp_jev_analyses WHERE original_run_id = $1 AND challenged_run_id = $2
+     ORDER BY created_at DESC LIMIT 1`,
+    [row.original_run_id, row.challenged_run_id],
+  ) as Array<Record<string, unknown>>;
+  const jev = analyses[0];
   const payload: PublicComparison = {
+    schemaVersion: 2,
     question: row.question as string,
     answers: row.answers as string[],
     originalInput: row.original_input as string,
@@ -423,6 +459,19 @@ export async function publishOwnedCase(input: { ownerHash: string; caseId: strin
     challengeIntent: (row.challenge_intent as "preserve" | "change" | null) ?? null,
     classification: row.status as string,
     challengeKind: row.challenge_kind as string,
+    recordedAt: {
+      original: new Date(row.original_created_at as string).toISOString(),
+      challenged: new Date(row.challenged_created_at as string).toISOString(),
+      case: new Date(row.case_created_at as string).toISOString(),
+    },
+    jev: jev ? {
+      observedBehavior: jev.observed_behavior as "held" | "flipped",
+      apparentRelevance: jev.apparent_relevance as "apparently_irrelevant" | "decision_relevant" | "ambiguous",
+      reviewPriority: jev.review_priority as "routine" | "review" | "urgent",
+      model: jev.model as string,
+      latencyMs: jev.latency_ms as number,
+      recordedAt: new Date(jev.created_at as string).toISOString(),
+    } : null,
   };
   const id = randomBytes(18).toString("base64url");
   await client().query(
@@ -439,6 +488,23 @@ export async function getPublishedResult(id: string) {
     [id],
   ) as Array<{ public_payload: PublicComparison; created_at: string; expires_at: string }>;
   return rows[0] ? { payload: rows[0].public_payload, createdAt: rows[0].created_at, expiresAt: rows[0].expires_at } : null;
+}
+
+export async function listPublishedResults(limit = 24): Promise<PublishedEvidence[]> {
+  if (!isPersistenceConfigured()) return [];
+  await ensureSchema();
+  const safeLimit = Math.max(1, Math.min(limit, 50));
+  const rows = await client().query(
+    `SELECT id, public_payload, created_at, expires_at
+     FROM cp_published_results
+     WHERE expires_at > now()
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [safeLimit],
+  ) as Array<{ id: string; public_payload: PublicComparison; created_at: string; expires_at: string }>;
+  return rows
+    .map((row) => ({ id: row.id, payload: row.public_payload, createdAt: row.created_at, expiresAt: row.expires_at }))
+    .filter(isCompletePublishedEvidence);
 }
 
 export async function getOwnedVersionAndCases(ownerHash: string, nodeId: string, versionId: string) {

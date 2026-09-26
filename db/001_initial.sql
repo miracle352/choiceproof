@@ -76,3 +76,21 @@ CREATE TABLE IF NOT EXISTS cp_published_results (
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS cp_published_results_created_idx ON cp_published_results (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS cp_jev_analyses (
+  id text PRIMARY KEY,
+  node_id text NOT NULL REFERENCES cp_nodes(id) ON DELETE CASCADE,
+  version_id text NOT NULL REFERENCES cp_versions(id) ON DELETE CASCADE,
+  original_run_id text NOT NULL REFERENCES cp_runs(id) ON DELETE CASCADE,
+  challenged_run_id text NOT NULL REFERENCES cp_runs(id) ON DELETE CASCADE,
+  observed_behavior text NOT NULL,
+  apparent_relevance text NOT NULL,
+  review_priority text NOT NULL,
+  model text NOT NULL,
+  latency_ms integer NOT NULL,
+  raw_response jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (original_run_id, challenged_run_id)
+);

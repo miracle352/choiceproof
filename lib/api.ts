@@ -31,6 +31,7 @@ export function publicErrorFor(error: unknown): PublicApiError {
     VERSION_NOT_FOUND: { status: 404, code, message: "Decision version was not found." },
     RUN_PAIR_NOT_FOUND: { status: 409, code, message: "The measured comparison could not be verified. Run the comparison again before saving." },
     CASE_NOT_FOUND: { status: 404, code, message: "The saved case was not found in this browser workspace." },
+    HELD_OUT_PUBLICATION_FORBIDDEN: { status: 409, code, message: "Held-out cases stay private and cannot be published." },
   };
   return known[code] ?? { status: 500, code: "INTERNAL_ERROR", message: "The request failed unexpectedly." };
 }

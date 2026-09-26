@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiError, readJson } from "@/lib/api";
-import { getOwnedMeasuredComparison } from "@/lib/db";
+import { getOwnedMeasuredComparison, saveJevAnalysis } from "@/lib/db";
 import { analyzeExperimentWithJev, isJevConfigured, JevAdapterError } from "@/lib/jev";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 import { enforceRunBudget } from "@/lib/rate-limit";
@@ -30,6 +30,13 @@ export async function POST(request: NextRequest) {
       challengedRunId: value.challengedRunId as string,
     });
     const analysis = await analyzeExperimentWithJev(measured);
+    await saveJevAnalysis({
+      nodeId: value.nodeId as string,
+      versionId: value.versionId as string,
+      originalRunId: value.originalRunId as string,
+      challengedRunId: value.challengedRunId as string,
+      analysis,
+    });
     return attachOwnerCookie(NextResponse.json({ ok: true, analysis }, { headers: { "Cache-Control": "no-store" } }), owner);
   } catch (error) {
     if (error instanceof JevAdapterError) {

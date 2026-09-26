@@ -2,6 +2,13 @@
 
 **Test the choice. Keep the proof.** Choiceproof tests bounded AI decisions with OpenServ SERV Reasoning v2. It records exact inputs and actual responses, lets a human label a changed answer, and reruns saved cases against a candidate revision.
 
+## Product surfaces
+
+- `/` explains the experiment and shows one complete owner-published record when available; otherwise it uses a clearly labeled one-variable SAMPLE.
+- `/chamber` is the private anonymous workbench for live comparisons, human review, saved cases, and revision evaluation.
+- `/evidence` lists only complete, unexpired, explicitly published non-held-out cases.
+- `/share/[id]` preserves the recorded comparison and can rerun the same inputs without overwriting it.
+
 ## The 60-second path
 
 1. Edit the question, 2–5 distinct answers, or synthetic input.
@@ -51,7 +58,9 @@ See [architecture](docs/ARCHITECTURE.md), [deployment](docs/DEPLOYMENT.md), [ope
 
 - Inputs are private to an anonymous HttpOnly browser workspace by default.
 - Publication requires a saved case, an explicit consent checkbox, and a publish action.
+- A publication preview shows the inputs, answer set, measured answers, label, and metadata that will become public. Held-out cases cannot be published.
 - Links expire after 30 days and omit raw provider responses and owner identifiers.
+- New published records include both run timestamps and an available persisted Jev analysis. Incomplete legacy records are not listed in the public gallery.
 - Evaluation uses the first 12 cases; held-out cases never enter SERV revision prompts.
 
 ## Roadmap — not implemented

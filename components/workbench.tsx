@@ -17,6 +17,7 @@ import type {
 } from "@/lib/contracts";
 import { validateDecisionRequest } from "@/lib/contracts";
 import { classifyChallengeReview, repeatedRunDisagrees, type LabelMapping } from "@/lib/domain";
+import { REFUND_CHALLENGE, REFUND_EXAMPLE } from "@/lib/example";
 
 type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean; jevConfigured: boolean };
 type BusyState = "decision" | "propose" | "quick" | "compare" | "save" | "publish" | "suggest" | "evaluate" | null;
@@ -46,12 +47,7 @@ type EvaluationResult = {
   summary: { regressions: number; needsRelabeling: number; notComparable: number; evaluated: number };
 };
 
-const INITIAL: DecisionRequest = {
-  question: "Should this refund request be approved, escalated, or declined?",
-  answers: ["Approve", "Escalate", "Decline"],
-  input:
-    "Order #1842 arrived 12 days late. The customer contacted support twice before delivery, the package is unopened, and the request was submitted 4 days after arrival. Policy allows returns within 30 days.",
-};
+const INITIAL: DecisionRequest = REFUND_EXAMPLE;
 
 const SAMPLE: DecisionSuccess = {
   ok: true,
@@ -70,8 +66,7 @@ const SAMPLE: DecisionSuccess = {
   },
 };
 
-const SAMPLE_CHALLENGE_INPUT =
-  "Order #1842 arrived 12 days late. The customer contacted support twice before delivery, but carrier records now show the package was opened and the refund request was submitted 45 days after arrival. Policy allows returns within 30 days.";
+const SAMPLE_CHALLENGE_INPUT = REFUND_CHALLENGE;
 
 const SAMPLE_CHALLENGED: DecisionSuccess = {
   ...SAMPLE,
@@ -189,6 +184,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
   const [setKind, setSetKind] = useState<"labeled" | "held_out">("labeled");
   const [savedComparisonKey, setSavedComparisonKey] = useState<string | null>(null);
   const [savedCaseId, setSavedCaseId] = useState<string | null>(null);
+  const [savedCaseSet, setSavedCaseSet] = useState<"labeled" | "held_out" | null>(null);
   const [publishConsent, setPublishConsent] = useState(false);
   const [publishedPath, setPublishedPath] = useState<string | null>(null);
   const [repeatDisagreement, setRepeatDisagreement] = useState<{ before: string; after: string } | null>(null);
@@ -405,6 +401,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
     setMeaningPreserved(null);
     setSavedComparisonKey(null);
     setSavedCaseId(null);
+    setSavedCaseSet(null);
     setPublishConsent(false);
     setPublishedPath(null);
     setCandidateQuestion(data.version.question);
@@ -462,6 +459,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       setCases((current) => [data.case, ...current.filter((item) => item.id !== data.case.id)]);
       setSavedComparisonKey(comparisonKey);
       setSavedCaseId(data.case.id);
+      setSavedCaseSet(data.case.setKind);
     } catch (cause) {
       captureError(cause, "The reviewed case could not be saved.", operation.requestId, false);
     } finally {
@@ -544,14 +542,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
 
   return (
     <>
-      <a className="skip-link" href="#workbench">Skip to workbench</a>
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label="Choiceproof home"><span className="brand-mark" aria-hidden="true"><i /><i /></span><span>CHOICEPROOF</span></a>
-        <nav aria-label="Product sections"><a href="#workbench">Chamber</a><a href="#cases">Case shelf</a><a href="#revision">Revision bench</a></nav>
-        <span className="header-note">Bounded decision testing</span>
-      </header>
-
-      <main id="top">
+      <main id="main-content" className="chamber-page-main">
         <section className="chamber-hero" id="workbench" aria-labelledby="page-title" aria-busy={Boolean(busy)}>
           <div className="chamber-intro">
             <p className="eyebrow">THE DECISION CHAMBER / OPENServ SERV REASONING</p>
@@ -700,7 +691,8 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
               <fieldset><legend>What was this edit intended to do?</legend><div className="segmented"><button type="button" aria-pressed={meaningPreserved === true} className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Preserve decision</button><button type="button" aria-pressed={meaningPreserved === false} className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>Change decision</button></div></fieldset>
               <div><label htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled · can guide revisions</option><option value="held_out">Held-out · evaluation only</option></select></div>
               <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || !expectedConfirmed || meaningPreserved == null || Boolean(busy) || comparisonSaved}>{comparisonSaved ? "CASE SAVED" : busy === "save" ? "SAVING…" : "SAVE REVIEWED CASE"}</button>
-              {comparisonSaved && <div className="publish-control"><label><input type="checkbox" checked={publishConsent} onChange={(event) => setPublishConsent(event.target.checked)} disabled={Boolean(publishedPath)} /><span>I understand this synthetic input pair and its measured answers will be public for 30 days.</span></label>{publishedPath ? <a href={publishedPath}>Open published result ↗</a> : <button type="button" className="text-button" onClick={publishCase} disabled={!publishConsent || busy === "publish"}>{busy === "publish" ? "Publishing…" : "Publish a share link"}</button>}</div>}
+              {comparisonSaved && savedCaseSet === "held_out" && <div className="publish-control"><strong>HELD-OUT / PRIVATE</strong><p>Held-out cases cannot be published. They remain available only to this anonymous workspace for revision evaluation.</p></div>}
+              {comparisonSaved && savedCaseSet === "labeled" && <div className="publish-control"><details><summary>Preview what becomes public</summary><div className="publish-preview"><p><strong>Question:</strong> {comparison.snapshot.question}</p><p><strong>Allowed answers:</strong> {comparison.snapshot.answers.join(" · ")}</p><p><strong>Original input:</strong> {comparison.snapshot.originalInput}</p><p><strong>Changed input:</strong> {comparison.snapshot.challengeInput}</p><p><strong>Recorded answers:</strong> {comparison.original.selectedAnswer} → {comparison.challenged.selectedAnswer}</p><p><strong>Models:</strong> {comparison.original.model} / {comparison.challenged.model}</p><p><strong>Providers:</strong> {comparison.original.provider ?? "not returned"} / {comparison.challenged.provider ?? "not returned"}</p><p><strong>Human label:</strong> Expected {expectedAnswer}; intent {meaningPreserved ? "preserve" : "change"}.</p><p><strong>Jev:</strong> {jevState.status === "live" ? `${jevState.observedBehavior}, ${jevState.apparentRelevance.replaceAll("_", " ")}, ${jevState.reviewPriority}` : "Unavailable"}</p><p>Recorded timestamps are included. Raw provider JSON and workspace ownership are excluded. The link expires in 30 days.</p></div></details><label><input type="checkbox" checked={publishConsent} onChange={(event) => setPublishConsent(event.target.checked)} disabled={Boolean(publishedPath)} /><span>I reviewed this synthetic or consented case and choose to make the previewed data public for 30 days.</span></label>{publishedPath ? <a href={publishedPath}>Open published result ↗</a> : <button type="button" className="text-button" onClick={publishCase} disabled={!publishConsent || busy === "publish"}>{busy === "publish" ? "Publishing…" : "Publish this case"}</button>}</div>}
             </div>
           </div>
         </section>}
@@ -724,7 +716,6 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
           {evaluation && <div className="evaluation-report"><div className={`evaluation-summary ${evaluation.summary.regressions ? "has-regression" : "no-regression"}`}><span>MEASURED RESULT / VERSION {evaluation.candidateVersion.versionNumber}</span><strong>{evaluation.summary.regressions ? `${evaluation.summary.regressions} REGRESSION${evaluation.summary.regressions === 1 ? "" : "S"} DETECTED` : "NO REGRESSIONS IN THE EVALUATED CASES"}</strong><p>{evaluation.summary.evaluated} evaluated. {evaluation.summary.needsRelabeling} need relabeling. {evaluation.summary.notComparable} not comparable. Passing these cases is not a universal safety guarantee.</p></div><div className="evaluation-groups">{(["labeled", "held_out"] as const).map((kind) => <section key={kind}><h3>{kind === "labeled" ? "Labeled cases" : "Held-out cases"}</h3>{evaluation.results.filter((item) => item.setKind === kind).map((item) => <article className={`evaluation-row verdict-${item.verdict?.toLowerCase() ?? "relabel"}`} key={item.caseId}><span>{item.status === "NEEDS_RELABELING" ? "NEEDS RELABELING" : item.status === "NOT_COMPARABLE" ? "NOT COMPARABLE / SKIPPED" : item.verdict?.replaceAll("_", " ")}</span>{item.status === "EVALUATED" && <strong>{item.baselineAnswer} → {item.candidateAnswer}<small>expected {item.expectedAnswer}</small></strong>}</article>)}</section>)}</div></div>}
         </section>
 
-        <footer><div><strong>CHOICEPROOF</strong><span>Measure the boundary. Keep the evidence.</span></div><div><span>Private by default</span><span>40 run units / 5 minutes</span><span>First 12 cases per evaluation</span><span>No universal safety claims</span></div></footer>
       </main>
     </>
   );
