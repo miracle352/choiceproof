@@ -26,6 +26,55 @@ export type DecisionFailure = {
 
 export type DecisionResponse = DecisionSuccess | DecisionFailure;
 
+export const CHALLENGE_KINDS = [
+  "irrelevant_context",
+  "reordered_evidence",
+  "ambiguity",
+  "conflicting_evidence",
+  "embedded_instruction",
+] as const;
+
+export type ChallengeKind = (typeof CHALLENGE_KINDS)[number] | "manual";
+
+export type ChallengeProposal = {
+  kind: Exclude<ChallengeKind, "manual">;
+  label: string;
+  input: string;
+};
+
+export type PersistedCase = {
+  id: string;
+  nodeId: string;
+  sourceVersionId: string;
+  setKind: "labeled" | "held_out";
+  challengeKind: ChallengeKind;
+  originalInput: string;
+  challengeInput: string;
+  originalAnswer: string;
+  challengedAnswer: string;
+  expectedAnswer: string;
+  meaningPreserved: boolean;
+  status: string;
+  createdAt: string;
+};
+
+export type DecisionVersion = {
+  id: string;
+  nodeId: string;
+  versionNumber: number;
+  question: string;
+  answers: string[];
+  candidateSource: "user" | "serv";
+  createdAt: string;
+};
+
+export type WorkspaceSnapshot = {
+  node: { id: string; title: string } | null;
+  version: DecisionVersion | null;
+  cases: PersistedCase[];
+  persistenceConfigured: boolean;
+};
+
 const MAX_QUESTION_LENGTH = 1200;
 const MAX_ANSWER_LENGTH = 120;
 const MAX_INPUT_LENGTH = 12_000;

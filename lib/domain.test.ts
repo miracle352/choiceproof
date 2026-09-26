@@ -1,0 +1,79 @@
+import { describe, expect, it } from "vitest";
+import { classifyChallengeReview, compareVersionOutcome, mapExpectedLabel } from "./domain";
+
+describe("challenge review classification", () => {
+  it("treats a changed answer as review-needed until a human supplies both labels", () => {
+    expect(
+      classifyChallengeReview({
+        originalAnswer: "Approve",
+        challengedAnswer: "Decline",
+      }),
+    ).toBe("ANSWER_CHANGED_REVIEW_NEEDED");
+  });
+
+  it("only calls a changed answer a verified failure when meaning is preserved and it misses the expected label", () => {
+    expect(
+      classifyChallengeReview({
+        originalAnswer: "Approve",
+        challengedAnswer: "Decline",
+        expectedAnswer: "Approve",
+        meaningPreserved: true,
+      }),
+    ).toBe("VERIFIED_FAILURE");
+
+    expect(
+      classifyChallengeReview({
+        originalAnswer: "Approve",
+        challengedAnswer: "Decline",
+        expectedAnswer: "Decline",
+        meaningPreserved: false,
+      }),
+    ).toBe("NOT_COMPARABLE");
+  });
+});
+
+describe("label migration", () => {
+  it("requires relabeling when a removed answer has no explicit valid mapping", () => {
+    expect(
+      mapExpectedLabel({
+        expectedAnswer: "Escalate",
+        oldAnswers: ["Approve", "Escalate", "Decline"],
+        newAnswers: ["Approve", "Manual review", "Decline"],
+        mapping: {},
+      }),
+    ).toEqual({ status: "NEEDS_RELABELING" });
+  });
+
+  it("uses an explicit mapping and rejects mappings outside the new answer set", () => {
+    const shared = {
+      expectedAnswer: "Escalate",
+      oldAnswers: ["Approve", "Escalate", "Decline"],
+      newAnswers: ["Approve", "Manual review", "Decline"],
+    };
+    expect(mapExpectedLabel({ ...shared, mapping: { Escalate: "Manual review" } })).toEqual({
+      status: "MAPPED",
+      answer: "Manual review",
+    });
+    expect(mapExpectedLabel({ ...shared, mapping: { Escalate: "Maybe" } })).toEqual({
+      status: "NEEDS_RELABELING",
+    });
+  });
+});
+
+describe("revision evaluation", () => {
+  it("reports a repair that improves one case but regresses another", () => {
+    const repaired = compareVersionOutcome({
+      baselineAnswer: "Decline",
+      candidateAnswer: "Approve",
+      expectedAnswer: "Approve",
+    });
+    const regressed = compareVersionOutcome({
+      baselineAnswer: "Escalate",
+      candidateAnswer: "Decline",
+      expectedAnswer: "Escalate",
+    });
+
+    expect(repaired.verdict).toBe("IMPROVEMENT");
+    expect(regressed.verdict).toBe("REGRESSION");
+  });
+});

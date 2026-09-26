@@ -1,0 +1,60 @@
+import { NextRequest, NextResponse } from "next/server";
+import { apiError, readJson } from "@/lib/api";
+import { getOwnedVersionAndCases, saveCase } from "@/lib/db";
+import { classifyChallengeReview, type CaseSet } from "@/lib/domain";
+import { CHALLENGE_KINDS, type ChallengeKind } from "@/lib/contracts";
+import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function POST(request: NextRequest) {
+  const owner = getOwnerIdentity(request);
+  const body = await readJson(request);
+  if (!body.ok) return attachOwnerCookie(body.response, owner);
+  if (!body.value || typeof body.value !== "object" || Array.isArray(body.value)) {
+    return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_INPUT", message: "Request body must be an object." } }, { status: 400 }), owner);
+  }
+  const value = body.value as Record<string, unknown>;
+  const requiredStrings = ["nodeId", "sourceVersionId", "originalInput", "challengeInput", "originalAnswer", "challengedAnswer", "expectedAnswer", "originalRunId", "challengedRunId"];
+  if (requiredStrings.some((key) => typeof value[key] !== "string" || !(value[key] as string).trim())) {
+    return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_INPUT", message: "Case labels and run identifiers are required." } }, { status: 400 }), owner);
+  }
+  if (typeof value.meaningPreserved !== "boolean") {
+    return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_INPUT", message: "Meaning-preserved must be explicitly marked." } }, { status: 400 }), owner);
+  }
+  const setKind: CaseSet = value.setKind === "held_out" ? "held_out" : "labeled";
+  const challengeKind: ChallengeKind = typeof value.challengeKind === "string" && (value.challengeKind === "manual" || CHALLENGE_KINDS.includes(value.challengeKind as never)) ? value.challengeKind as ChallengeKind : "manual";
+
+  try {
+    const stored = await getOwnedVersionAndCases(owner.hash, value.nodeId as string, value.sourceVersionId as string);
+    if (!stored.version.answers.includes(value.expectedAnswer as string)) {
+      return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_LABEL", message: "Expected answer must be one of this version's allowed answers." } }, { status: 400 }), owner);
+    }
+    const status = classifyChallengeReview({
+      originalAnswer: value.originalAnswer as string,
+      challengedAnswer: value.challengedAnswer as string,
+      expectedAnswer: value.expectedAnswer as string,
+      meaningPreserved: value.meaningPreserved,
+    });
+    const saved = await saveCase({
+      ownerHash: owner.hash,
+      nodeId: value.nodeId as string,
+      sourceVersionId: value.sourceVersionId as string,
+      setKind,
+      challengeKind,
+      originalInput: value.originalInput as string,
+      challengeInput: value.challengeInput as string,
+      originalAnswer: value.originalAnswer as string,
+      challengedAnswer: value.challengedAnswer as string,
+      expectedAnswer: value.expectedAnswer as string,
+      meaningPreserved: value.meaningPreserved,
+      status,
+      originalRunId: value.originalRunId as string,
+      challengedRunId: value.challengedRunId as string,
+    });
+    return attachOwnerCookie(NextResponse.json({ ok: true, case: saved }), owner);
+  } catch (error) {
+    return attachOwnerCookie(apiError(error), owner);
+  }
+}
