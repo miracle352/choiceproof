@@ -8,6 +8,27 @@ import type { CaseSet, LabelMapping, ReviewClassification } from "@/lib/domain";
 
 let schemaPromise: Promise<void> | null = null;
 
+export class DatabaseAccessError extends Error {
+  constructor(
+    public readonly code: "DATABASE_CONNECTION_FAILED" | "DATABASE_SCHEMA_FAILED" | "DATABASE_QUERY_FAILED",
+  ) {
+    super(code);
+    this.name = "DatabaseAccessError";
+  }
+}
+
+export function classifyDatabaseError(error: unknown): DatabaseAccessError {
+  if (error instanceof DatabaseAccessError) return error;
+  const message = error instanceof Error ? error.message.toLocaleLowerCase() : "";
+  if (message.includes("connect") || message.includes("fetch failed") || message.includes("timeout") || message.includes("econn")) {
+    return new DatabaseAccessError("DATABASE_CONNECTION_FAILED");
+  }
+  if (message.includes("relation") || message.includes("column") || message.includes("schema") || message.includes("permission") || message.includes("syntax")) {
+    return new DatabaseAccessError("DATABASE_SCHEMA_FAILED");
+  }
+  return new DatabaseAccessError("DATABASE_QUERY_FAILED");
+}
+
 function databaseUrl() {
   return process.env.DATABASE_URL?.trim() || null;
 }
@@ -56,9 +77,10 @@ async function ensureSchema() {
         created_at timestamptz NOT NULL DEFAULT now()
       )`);
       await sql.query("CREATE INDEX IF NOT EXISTS cp_cases_node_set_idx ON cp_cases (node_id, set_kind, created_at DESC)");
+      await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS cp_cases_run_pair_unique ON cp_cases (original_run_id, challenged_run_id) WHERE original_run_id IS NOT NULL AND challenged_run_id IS NOT NULL");
     })().catch((error) => {
       schemaPromise = null;
-      throw error;
+      throw classifyDatabaseError(error);
     });
   }
   await schemaPromise;
@@ -250,16 +272,61 @@ export async function saveCase(input: {
   const sql = client();
   const owned = await sql.query("SELECT id FROM cp_nodes WHERE id = $1 AND owner_hash = $2", [input.nodeId, input.ownerHash]);
   if (!owned.length) throw new Error("NODE_NOT_FOUND");
+  const existing = await sql.query(
+    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE original_run_id = $1 AND challenged_run_id = $2 LIMIT 1",
+    [input.originalRunId, input.challengedRunId],
+  ) as CaseRow[];
+  if (existing[0]) return toCase(existing[0]);
   const id = randomUUID();
   await sql.query(
-    "INSERT INTO cp_cases (id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, original_run_id, challenged_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+    "INSERT INTO cp_cases (id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, original_run_id, challenged_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING",
     [id, input.nodeId, input.sourceVersionId, input.setKind, input.challengeKind, input.originalInput, input.challengeInput, input.originalAnswer, input.challengedAnswer, input.expectedAnswer, input.meaningPreserved, input.status, input.originalRunId, input.challengedRunId],
   );
   const rows = await sql.query(
-    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE id = $1",
-    [id],
+    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE (id = $1) OR (original_run_id = $2 AND challenged_run_id = $3) ORDER BY (id = $1) DESC LIMIT 1",
+    [id, input.originalRunId, input.challengedRunId],
   ) as CaseRow[];
   return toCase(rows[0]);
+}
+
+export async function getOwnedMeasuredComparison(input: {
+  ownerHash: string;
+  nodeId: string;
+  versionId: string;
+  originalRunId: string;
+  challengedRunId: string;
+}) {
+  await ensureSchema();
+  const rows = await client().query(
+    `SELECT
+       v.id AS version_id, v.question, v.answers,
+       original.input_text AS original_input, original.selected_answer AS original_answer,
+       challenged.input_text AS challenge_input, challenged.selected_answer AS challenged_answer
+     FROM cp_versions v
+     JOIN cp_nodes n ON n.id = v.node_id
+     JOIN cp_runs original ON original.id = $4 AND original.node_id = v.node_id AND original.version_id = v.id
+     JOIN cp_runs challenged ON challenged.id = $5 AND challenged.node_id = v.node_id AND challenged.version_id = v.id
+     WHERE v.id = $2 AND v.node_id = $3 AND n.owner_hash = $1
+     LIMIT 1`,
+    [input.ownerHash, input.versionId, input.nodeId, input.originalRunId, input.challengedRunId],
+  ) as Array<{
+    version_id: string;
+    question: string;
+    answers: string[];
+    original_input: string;
+    original_answer: string;
+    challenge_input: string;
+    challenged_answer: string;
+  }>;
+  if (!rows[0]) throw new Error("RUN_PAIR_NOT_FOUND");
+  return {
+    question: rows[0].question,
+    answers: rows[0].answers,
+    originalInput: rows[0].original_input,
+    originalAnswer: rows[0].original_answer,
+    challengeInput: rows[0].challenge_input,
+    challengedAnswer: rows[0].challenged_answer,
+  };
 }
 
 export async function getOwnedVersionAndCases(ownerHash: string, nodeId: string, versionId: string) {

@@ -59,3 +59,7 @@ CREATE TABLE IF NOT EXISTS cp_cases (
 
 CREATE INDEX IF NOT EXISTS cp_cases_node_set_idx
   ON cp_cases (node_id, set_kind, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS cp_cases_run_pair_unique
+  ON cp_cases (original_run_id, challenged_run_id)
+  WHERE original_run_id IS NOT NULL AND challenged_run_id IS NOT NULL;

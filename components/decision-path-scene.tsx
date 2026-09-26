@@ -23,16 +23,16 @@ const STATE_LABELS: Record<PathSceneState, string> = {
 export function DecisionPathScene({ state, originalAnswer, challengedAnswer }: DecisionPathSceneProps) {
   const rootRef = useRef<HTMLElement>(null);
   const [videoEnabled, setVideoEnabled] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
-    const narrowViewport = window.matchMedia("(max-width: 720px)").matches;
     const saveData = "connection" in navigator && Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData);
-    if (reducedMotion || coarsePointer || narrowViewport || saveData) return;
+    if (reducedMotion || saveData) return;
 
     const observer = new IntersectionObserver(([entry]) => {
       if (entry?.isIntersecting) {
@@ -74,12 +74,21 @@ export function DecisionPathScene({ state, originalAnswer, challengedAnswer }: D
       aria-label={accessibleSummary}
     >
       <div className="path-media" aria-hidden="true">
-        {videoEnabled ? (
-          <video autoPlay loop muted playsInline preload="none" poster="/faultline-poster.webp">
-            <source src="/faultline-paths-1080p.mp4" type="video/mp4" />
+        <Image src="/faultline-poster.webp" alt="" fill sizes="(max-width: 720px) 100vw, 48vw" priority />
+        {videoEnabled && !videoFailed && (
+          <video
+            className={videoReady ? "is-ready" : ""}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="metadata"
+            poster="/faultline-poster.webp"
+            onCanPlay={() => setVideoReady(true)}
+            onError={() => setVideoFailed(true)}
+          >
+            <source src="/faultline-paths-720p.mp4" type="video/mp4" />
           </video>
-        ) : (
-          <Image src="/faultline-poster.webp" alt="" fill sizes="(max-width: 720px) 100vw, 44vw" loading="lazy" />
         )}
         <div className="path-vignette" />
         <div className="path-origin" />

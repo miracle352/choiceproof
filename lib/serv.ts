@@ -3,8 +3,8 @@ import type {
   DecisionRequest,
   DecisionSuccess,
   PersistedCase,
-} from "@/lib/contracts";
-import { CHALLENGE_KINDS, validateDecisionRequest } from "@/lib/contracts";
+} from "./contracts";
+import { CHALLENGE_KINDS, validateDecisionRequest } from "./contracts";
 
 const SERV_ENDPOINT = "https://inference-api.openserv.ai/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-5.4-mini";
@@ -47,14 +47,6 @@ function timeoutMs() {
   const configured = Number(process.env.SERV_TIMEOUT_MS ?? 30_000);
   if (!Number.isFinite(configured)) return 30_000;
   return Math.min(60_000, Math.max(5_000, configured));
-}
-
-function extractApiMessage(raw: unknown): string | null {
-  if (!raw || typeof raw !== "object") return null;
-  const error = (raw as { error?: unknown }).error;
-  if (!error || typeof error !== "object") return null;
-  const message = (error as { message?: unknown }).message;
-  return typeof message === "string" && message.trim() ? message.trim() : null;
 }
 
 function extractToolArguments(raw: ServResponse, toolName: string): unknown {
@@ -112,13 +104,22 @@ async function callServTool(input: {
   const latencyMs = Math.round(performance.now() - startedAt);
   const raw: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const apiMessage = extractApiMessage(raw);
-    const message = response.status === 401
-      ? "SERV rejected the configured API key."
-      : response.status === 429
-        ? "SERV rate-limited this request. Try again shortly."
-        : apiMessage || `SERV returned HTTP ${response.status}.`;
-    throw new ServAdapterError("SERV_API_ERROR", message, response.status);
+    if (response.status === 400) {
+      throw new ServAdapterError("SERV_INVALID_REQUEST", "SERV rejected the model or request format. Check SERV_MODEL against the current catalog.", 400);
+    }
+    if (response.status === 401) {
+      throw new ServAdapterError("SERV_AUTH_FAILED", "SERV rejected the configured API key.", 401);
+    }
+    if (response.status === 404) {
+      throw new ServAdapterError("SERV_MODEL_NOT_FOUND", "SERV could not find the configured model or endpoint. Check SERV_MODEL.", 404);
+    }
+    if (response.status === 429) {
+      throw new ServAdapterError("SERV_RATE_LIMITED", "SERV rate-limited this request. Try again shortly.", 429);
+    }
+    if (response.status >= 500) {
+      throw new ServAdapterError("SERV_UPSTREAM_FAILED", "SERV or its upstream provider failed to complete the request. Try again shortly.", 502);
+    }
+    throw new ServAdapterError("SERV_API_ERROR", `SERV returned HTTP ${response.status}.`, response.status);
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ServAdapterError("INVALID_SERV_RESPONSE", "SERV returned an unreadable response.", 502);

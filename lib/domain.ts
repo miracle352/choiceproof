@@ -18,6 +18,31 @@ export type EvaluationOutcome = {
   verdict: "REGRESSION" | "IMPROVEMENT" | "UNCHANGED_PASS" | "UNCHANGED_FAILURE";
 };
 
+export type MeasuredComparison = {
+  originalInput: string;
+  challengeInput: string;
+  originalAnswer: string;
+  challengedAnswer: string;
+};
+
+export function buildReviewedCase<T extends MeasuredComparison>(input: {
+  measured: T;
+  expectedAnswer: string;
+  meaningPreserved: boolean;
+}) {
+  return {
+    ...input.measured,
+    expectedAnswer: input.expectedAnswer,
+    meaningPreserved: input.meaningPreserved,
+    status: classifyChallengeReview({
+      originalAnswer: input.measured.originalAnswer,
+      challengedAnswer: input.measured.challengedAnswer,
+      expectedAnswer: input.expectedAnswer,
+      meaningPreserved: input.meaningPreserved,
+    }),
+  };
+}
+
 export function classifyChallengeReview(input: {
   originalAnswer: string;
   challengedAnswer: string;

@@ -4,8 +4,8 @@ import { connection } from "next/server";
 
 export default async function Home() {
   await connection();
-  const liveConfigured = isServConfigured();
-  const persistenceConfigured = Boolean(process.env.DATABASE_URL?.trim());
+  const servConfigured = isServConfigured();
+  const databaseConfigured = Boolean(process.env.DATABASE_URL?.trim());
 
-  return <Workbench liveConfigured={liveConfigured} persistenceConfigured={persistenceConfigured} />;
+  return <Workbench servConfigured={servConfigured} databaseConfigured={databaseConfigured} />;
 }

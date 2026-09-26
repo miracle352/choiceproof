@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyChallengeReview, compareVersionOutcome, mapExpectedLabel } from "./domain";
+import { buildReviewedCase, classifyChallengeReview, compareVersionOutcome, mapExpectedLabel } from "./domain";
 
 describe("challenge review classification", () => {
   it("treats a changed answer as review-needed until a human supplies both labels", () => {
@@ -9,6 +9,27 @@ describe("challenge review classification", () => {
         challengedAnswer: "Decline",
       }),
     ).toBe("ANSWER_CHANGED_REVIEW_NEEDED");
+  });
+
+  it("builds a saved case from the measured snapshot, not later draft edits", () => {
+    const measured = {
+      originalInput: "Measured original",
+      challengeInput: "Measured challenge",
+      originalAnswer: "Approve",
+      challengedAnswer: "Decline",
+    };
+    const reviewed = buildReviewedCase({
+      measured,
+      expectedAnswer: "Approve",
+      meaningPreserved: true,
+    });
+
+    expect(reviewed).toMatchObject({
+      ...measured,
+      expectedAnswer: "Approve",
+      meaningPreserved: true,
+      status: "VERIFIED_FAILURE",
+    });
   });
 
   it("only calls a changed answer a verified failure when meaning is preserved and it misses the expected label", () => {

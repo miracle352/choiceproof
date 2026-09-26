@@ -46,6 +46,12 @@ export async function POST(request: NextRequest) {
       originalRunId,
       challengedRunId,
       challengeKind: kind,
+      snapshot: {
+        question: original.data.question,
+        answers: original.data.answers,
+        originalInput: original.data.input,
+        challengeInput: challenged.data.input,
+      },
     }, { headers: { "Cache-Control": "no-store" } }), owner);
   } catch (error) {
     return attachOwnerCookie(apiError(error), owner);

@@ -26,6 +26,19 @@ export type DecisionFailure = {
 
 export type DecisionResponse = DecisionSuccess | DecisionFailure;
 
+export type DecisionSnapshot = {
+  question: string;
+  answers: string[];
+  input: string;
+};
+
+export type ComparisonSnapshot = {
+  question: string;
+  answers: string[];
+  originalInput: string;
+  challengeInput: string;
+};
+
 export const CHALLENGE_KINDS = [
   "irrelevant_context",
   "reordered_evidence",
@@ -73,6 +86,18 @@ export type WorkspaceSnapshot = {
   version: DecisionVersion | null;
   cases: PersistedCase[];
   persistenceConfigured: boolean;
+};
+
+export type ComparisonSuccess = {
+  ok: true;
+  nodeId: string;
+  version: DecisionVersion;
+  original: DecisionSuccess;
+  challenged: DecisionSuccess;
+  originalRunId: string;
+  challengedRunId: string;
+  challengeKind: ChallengeKind;
+  snapshot: ComparisonSnapshot;
 };
 
 const MAX_QUESTION_LENGTH = 1200;
