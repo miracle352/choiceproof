@@ -18,6 +18,10 @@ export function revisionCaseDisposition(meaningPreserved: boolean, challengeInte
   return challengeIntent || meaningPreserved ? "READY" as const : "NOT_COMPARABLE" as const;
 }
 
+export function casesForRevisionPrompt<T extends { setKind: CaseSet; meaningPreserved: boolean; challengeIntent?: "preserve" | "change" | null }>(cases: T[]) {
+  return cases.filter((item) => item.setKind === "labeled" && revisionCaseDisposition(item.meaningPreserved, item.challengeIntent) === "READY");
+}
+
 export type EvaluationOutcome = {
   baselineAnswer: string;
   candidateAnswer: string;

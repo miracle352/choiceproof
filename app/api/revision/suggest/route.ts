@@ -4,6 +4,7 @@ import { getOwnedVersionAndCases } from "@/lib/db";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 import { suggestServRevision } from "@/lib/serv";
 import { enforceRunBudget } from "@/lib/rate-limit";
+import { casesForRevisionPrompt } from "@/lib/domain";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
   try {
     await enforceRunBudget(request, owner.hash, 1);
     const stored = await getOwnedVersionAndCases(owner.hash, nodeId, versionId);
-    const labeled = stored.cases.filter((item) => item.setKind === "labeled" && (item.challengeIntent || item.meaningPreserved));
+    const labeled = casesForRevisionPrompt(stored.cases);
     if (!labeled.length) {
       return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "NO_LABELED_CASES", message: "Save at least one explicitly labeled case first." } }, { status: 400 }), owner);
     }

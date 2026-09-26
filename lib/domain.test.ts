@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewedCase, classifyChallengeReview, compareVersionOutcome, isExpectedLabelValid, mapExpectedLabel, repeatedRunDisagrees, revisionCaseDisposition } from "./domain";
+import { buildReviewedCase, casesForRevisionPrompt, classifyChallengeReview, compareVersionOutcome, isExpectedLabelValid, mapExpectedLabel, repeatedRunDisagrees, revisionCaseDisposition } from "./domain";
 
 describe("challenge review classification", () => {
   it("treats a changed answer as review-needed until a human supplies both labels", () => {
@@ -100,6 +100,15 @@ describe("label migration", () => {
 });
 
 describe("revision evaluation", () => {
+  it("keeps held-out cases out of candidate-generation prompts", () => {
+    const cases = [
+      { id: "labeled", setKind: "labeled" as const, meaningPreserved: true, challengeIntent: "preserve" as const },
+      { id: "held-out", setKind: "held_out" as const, meaningPreserved: true, challengeIntent: "preserve" as const },
+      { id: "legacy-non-comparable", setKind: "labeled" as const, meaningPreserved: false, challengeIntent: null },
+    ];
+    expect(casesForRevisionPrompt(cases).map((item) => item.id)).toEqual(["labeled"]);
+  });
+
   it("skips reviewer-marked non-comparable cases instead of crediting a pass or failure", () => {
     expect(revisionCaseDisposition(false)).toBe("NOT_COMPARABLE");
     expect(revisionCaseDisposition(true)).toBe("READY");
