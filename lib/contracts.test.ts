@@ -34,4 +34,10 @@ describe("decision input validation", () => {
       input: "Synthetic request",
     })).toMatchObject({ success: false });
   });
+
+  it("rejects empty, oversized, and overlapping public inputs", () => {
+    expect(validateDecisionRequest({ question: "Should this request pass?", answers: ["Approve", "Decline"], input: "" })).toMatchObject({ success: false });
+    expect(validateDecisionRequest({ question: "Should this request pass?", answers: ["Approve", "Decline"], input: "x".repeat(12_001) })).toMatchObject({ success: false });
+    expect(validateDecisionRequest({ question: "Should this request pass?", answers: ["Approve", "Approve with review"], input: "Synthetic" })).toEqual({ success: false, message: "Allowed answers must not overlap or contain one another. Use distinct labels." });
+  });
 });

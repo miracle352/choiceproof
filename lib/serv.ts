@@ -8,6 +8,7 @@ import { CHALLENGE_KINDS, validateDecisionRequest } from "./contracts";
 
 const SERV_ENDPOINT = "https://inference-api.openserv.ai/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-5.4-mini";
+const MAX_SERV_RESPONSE_BYTES = 1_000_000;
 
 export function isServConfigured() {
   const value = process.env.SERV_API_KEY?.trim();
@@ -102,7 +103,15 @@ async function callServTool(input: {
   }
 
   const latencyMs = Math.round(performance.now() - startedAt);
-  const raw: unknown = await response.json().catch(() => null);
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_SERV_RESPONSE_BYTES) {
+    throw new ServAdapterError("SERV_RESPONSE_TOO_LARGE", "SERV returned a response larger than the public demo accepts.", 502);
+  }
+  const responseText = await response.text();
+  if (new TextEncoder().encode(responseText).byteLength > MAX_SERV_RESPONSE_BYTES) {
+    throw new ServAdapterError("SERV_RESPONSE_TOO_LARGE", "SERV returned a response larger than the public demo accepts.", 502);
+  }
+  const raw: unknown = (() => { try { return JSON.parse(responseText); } catch { return null; } })();
   if (!response.ok) {
     if (response.status === 400) {
       throw new ServAdapterError("SERV_INVALID_REQUEST", "SERV rejected the model or request format. Check SERV_MODEL against the current catalog.", 400);

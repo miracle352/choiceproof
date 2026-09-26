@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewedCase, classifyChallengeReview, compareVersionOutcome, mapExpectedLabel, revisionCaseDisposition } from "./domain";
+import { buildReviewedCase, classifyChallengeReview, compareVersionOutcome, isExpectedLabelValid, mapExpectedLabel, repeatedRunDisagrees, revisionCaseDisposition } from "./domain";
 
 describe("challenge review classification", () => {
   it("treats a changed answer as review-needed until a human supplies both labels", () => {
@@ -101,5 +101,19 @@ describe("revision evaluation", () => {
 
     expect(repaired.verdict).toBe("IMPROVEMENT");
     expect(regressed.verdict).toBe("REGRESSION");
+  });
+});
+
+describe("repeatability", () => {
+  it("flags disagreement only for the exact same decision snapshot", () => {
+    expect(repeatedRunDisagrees({ sameSnapshot: true, previousAnswer: "Approve", nextAnswer: "Decline" })).toBe(true);
+    expect(repeatedRunDisagrees({ sameSnapshot: false, previousAnswer: "Approve", nextAnswer: "Decline" })).toBe(false);
+  });
+});
+
+describe("human label validation", () => {
+  it("rejects a contradictory expected label outside the measured schema", () => {
+    expect(isExpectedLabelValid(["Approve", "Decline"], "Escalate")).toBe(false);
+    expect(isExpectedLabelValid(["Approve", "Decline"], "Approve")).toBe(true);
   });
 });

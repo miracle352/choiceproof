@@ -59,3 +59,19 @@ CREATE TABLE IF NOT EXISTS cp_cases (
 
 CREATE INDEX IF NOT EXISTS cp_cases_node_set_idx
   ON cp_cases (node_id, set_kind, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS cp_rate_limits (
+  bucket_key text NOT NULL,
+  window_id bigint NOT NULL,
+  units integer NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (bucket_key, window_id)
+);
+
+CREATE TABLE IF NOT EXISTS cp_published_results (
+  id text PRIMARY KEY,
+  owner_hash text NOT NULL,
+  public_payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL
+);

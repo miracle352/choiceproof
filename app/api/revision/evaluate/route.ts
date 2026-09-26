@@ -5,6 +5,7 @@ import { ensureNodeVersion, getOwnedVersionAndCases, saveRun } from "@/lib/db";
 import { compareVersionOutcome, mapExpectedLabel, revisionCaseDisposition, type LabelMapping } from "@/lib/domain";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 import { runServDecision } from "@/lib/serv";
+import { enforceRunBudget } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest) {
     if (!stored.cases.length) {
       return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "NO_CASES", message: "Save labeled or held-out cases before evaluating a revision." } }, { status: 400 }), owner);
     }
+    const comparableCount = stored.cases.slice(0, 12).filter((item) => item.meaningPreserved).length;
+    await enforceRunBudget(request, owner.hash, Math.max(1, comparableCount * 2));
     const candidateStored = await ensureNodeVersion({
       ownerHash: owner.hash,
       nodeId: value.nodeId,

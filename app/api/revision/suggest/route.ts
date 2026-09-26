@@ -3,6 +3,7 @@ import { apiError, readJson } from "@/lib/api";
 import { getOwnedVersionAndCases } from "@/lib/db";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 import { suggestServRevision } from "@/lib/serv";
+import { enforceRunBudget } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
     return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_INPUT", message: "A saved decision version is required." } }, { status: 400 }), owner);
   }
   try {
+    await enforceRunBudget(request, owner.hash, 1);
     const stored = await getOwnedVersionAndCases(owner.hash, nodeId, versionId);
     const labeled = stored.cases.filter((item) => item.setKind === "labeled" && item.meaningPreserved);
     if (!labeled.length) {

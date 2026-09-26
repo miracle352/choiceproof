@@ -25,7 +25,7 @@ export function attachOwnerCookie(response: NextResponse, owner: OwnerIdentity) 
   if (owner.isNew) {
     response.cookies.set(COOKIE_NAME, owner.token, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "strict",
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 60 * 60 * 24 * 365,

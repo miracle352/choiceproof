@@ -9,6 +9,10 @@ export type CaseSet = "labeled" | "held_out";
 
 export type LabelMapping = Record<string, string | null | undefined>;
 
+export function isExpectedLabelValid(answers: string[], expectedAnswer: string) {
+  return answers.includes(expectedAnswer);
+}
+
 export function revisionCaseDisposition(meaningPreserved: boolean) {
   return meaningPreserved ? "READY" as const : "NOT_COMPARABLE" as const;
 }
@@ -97,4 +101,8 @@ export function compareVersionOutcome(input: {
   else verdict = "UNCHANGED_FAILURE";
 
   return { ...input, baselinePass, candidatePass, verdict };
+}
+
+export function repeatedRunDisagrees(input: { sameSnapshot: boolean; previousAnswer: string; nextAnswer: string }) {
+  return input.sameSnapshot && input.previousAnswer !== input.nextAnswer;
 }

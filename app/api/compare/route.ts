@@ -4,6 +4,7 @@ import { CHALLENGE_KINDS, validateDecisionRequest, type ChallengeKind } from "@/
 import { ensureNodeVersion, isPersistenceConfigured, saveRun } from "@/lib/db";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 import { runServDecision } from "@/lib/serv";
+import { enforceRunBudget } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
 
   const owner = getOwnerIdentity(request);
   try {
+    await enforceRunBudget(request, owner.hash, 2);
     const nodeId = typeof value.nodeId === "string" ? value.nodeId : null;
     const persisted = await ensureNodeVersion({ ownerHash: owner.hash, nodeId, decision: original.data });
     const [originalResult, challengedResult] = await Promise.all([

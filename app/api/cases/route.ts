@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiError, readJson } from "@/lib/api";
 import { getOwnedMeasuredComparison, saveCase } from "@/lib/db";
-import { buildReviewedCase, type CaseSet } from "@/lib/domain";
+import { buildReviewedCase, isExpectedLabelValid, type CaseSet } from "@/lib/domain";
 import { CHALLENGE_KINDS, type ChallengeKind } from "@/lib/contracts";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       originalRunId: value.originalRunId as string,
       challengedRunId: value.challengedRunId as string,
     });
-    if (!measured.answers.includes(value.expectedAnswer as string)) {
+    if (!isExpectedLabelValid(measured.answers, value.expectedAnswer as string)) {
       return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_LABEL", message: "Expected answer must be one of this version's allowed answers." } }, { status: 400 }), owner);
     }
     const reviewed = buildReviewedCase({

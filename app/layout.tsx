@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FAULTLINE — Decision stress testing",
+  title: "Choiceproof — Test the choice. Keep the proof.",
   description:
-    "Find where bounded AI decisions break with controlled challenges, exact diffs, and OpenServ SERV Reasoning.",
+    "Test bounded AI decisions with controlled challenges, exact diffs, and OpenServ SERV Reasoning.",
   icons: [{ rel: "icon", url: "/favicon.svg", type: "image/svg+xml" }],
 };
 

@@ -100,9 +100,13 @@ export type ComparisonSuccess = {
   snapshot: ComparisonSnapshot;
 };
 
-const MAX_QUESTION_LENGTH = 1200;
-const MAX_ANSWER_LENGTH = 120;
-const MAX_INPUT_LENGTH = 12_000;
+export const MAX_QUESTION_LENGTH = 1200;
+export const MAX_ANSWER_LENGTH = 120;
+export const MAX_INPUT_LENGTH = 12_000;
+
+function comparableLabel(value: string) {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
 
 export function validateDecisionRequest(value: unknown):
   | { success: true; data: DecisionRequest }
@@ -145,6 +149,11 @@ export function validateDecisionRequest(value: unknown):
 
   if (new Set(answers.map((answer) => answer.toLocaleLowerCase())).size !== answers.length) {
     return { success: false, message: "Allowed answers must be unique." };
+  }
+
+  const labels = answers.map(comparableLabel);
+  if (labels.some((label, index) => labels.some((other, otherIndex) => index !== otherIndex && (label.includes(other) || other.includes(label))))) {
+    return { success: false, message: "Allowed answers must not overlap or contain one another. Use distinct labels." };
   }
 
   if (typeof body.input !== "string") {

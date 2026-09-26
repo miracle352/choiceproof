@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { stableCaseId } from "@/lib/case-id";
 import type { DecisionSuccess, DecisionVersion, PersistedCase, WorkspaceSnapshot } from "@/lib/contracts";
@@ -78,12 +78,31 @@ async function ensureSchema() {
         created_at timestamptz NOT NULL DEFAULT now()
       )`);
       await sql.query("CREATE INDEX IF NOT EXISTS cp_cases_node_set_idx ON cp_cases (node_id, set_kind, created_at DESC)");
+      await sql.query(`CREATE TABLE IF NOT EXISTS cp_rate_limits (
+        bucket_key text NOT NULL, window_id bigint NOT NULL, units integer NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (bucket_key, window_id)
+      )`);
+      await sql.query(`CREATE TABLE IF NOT EXISTS cp_published_results (
+        id text PRIMARY KEY, owner_hash text NOT NULL, public_payload jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL
+      )`);
     })().catch((error) => {
       schemaPromise = null;
       throw classifyDatabaseError(error);
     });
   }
   await schemaPromise;
+}
+
+export async function reserveRunUnits(bucketKey: string, windowId: number, units: number, limit: number) {
+  await ensureSchema();
+  const rows = await client().query(
+    `INSERT INTO cp_rate_limits (bucket_key, window_id, units) VALUES ($1, $2, $3)
+     ON CONFLICT (bucket_key, window_id) DO UPDATE SET units = cp_rate_limits.units + EXCLUDED.units
+     WHERE cp_rate_limits.units + EXCLUDED.units <= $4 RETURNING units`,
+    [bucketKey, windowId, units, limit],
+  );
+  return rows.length > 0;
 }
 
 type VersionRow = {
@@ -301,7 +320,9 @@ export async function getOwnedMeasuredComparison(input: {
     `SELECT
        v.id AS version_id, v.question, v.answers,
        original.input_text AS original_input, original.selected_answer AS original_answer,
-       challenged.input_text AS challenge_input, challenged.selected_answer AS challenged_answer
+       original.model AS original_model, original.provider AS original_provider, original.latency_ms AS original_latency_ms,
+       challenged.input_text AS challenge_input, challenged.selected_answer AS challenged_answer,
+       challenged.model AS challenged_model, challenged.provider AS challenged_provider, challenged.latency_ms AS challenged_latency_ms
      FROM cp_versions v
      JOIN cp_nodes n ON n.id = v.node_id
      JOIN cp_runs original ON original.id = $4 AND original.node_id = v.node_id AND original.version_id = v.id
@@ -315,8 +336,14 @@ export async function getOwnedMeasuredComparison(input: {
     answers: string[];
     original_input: string;
     original_answer: string;
+    original_model: string;
+    original_provider: string | null;
+    original_latency_ms: number;
     challenge_input: string;
     challenged_answer: string;
+    challenged_model: string;
+    challenged_provider: string | null;
+    challenged_latency_ms: number;
   }>;
   if (!rows[0]) throw new Error("RUN_PAIR_NOT_FOUND");
   return {
@@ -326,7 +353,74 @@ export async function getOwnedMeasuredComparison(input: {
     originalAnswer: rows[0].original_answer,
     challengeInput: rows[0].challenge_input,
     challengedAnswer: rows[0].challenged_answer,
+    originalModel: rows[0].original_model,
+    originalProvider: rows[0].original_provider,
+    originalLatencyMs: rows[0].original_latency_ms,
+    challengedModel: rows[0].challenged_model,
+    challengedProvider: rows[0].challenged_provider,
+    challengedLatencyMs: rows[0].challenged_latency_ms,
   };
+}
+
+export type PublicComparison = {
+  question: string;
+  answers: string[];
+  originalInput: string;
+  challengeInput: string;
+  original: { selectedAnswer: string; model: string; provider: string | null; latencyMs: number };
+  challenged: { selectedAnswer: string; model: string; provider: string | null; latencyMs: number };
+  expectedAnswer: string;
+  meaningPreserved: boolean;
+  classification: string;
+  challengeKind: string;
+};
+
+export async function publishOwnedCase(input: { ownerHash: string; caseId: string }) {
+  await ensureSchema();
+  const rows = await client().query(
+    `SELECT c.expected_answer, c.meaning_preserved, c.status, c.challenge_kind,
+       v.question, v.answers,
+       original.input_text AS original_input, original.selected_answer AS original_answer,
+       original.model AS original_model, original.provider AS original_provider, original.latency_ms AS original_latency_ms,
+       challenged.input_text AS challenge_input, challenged.selected_answer AS challenged_answer,
+       challenged.model AS challenged_model, challenged.provider AS challenged_provider, challenged.latency_ms AS challenged_latency_ms
+     FROM cp_cases c
+     JOIN cp_nodes n ON n.id = c.node_id AND n.owner_hash = $1
+     JOIN cp_versions v ON v.id = c.source_version_id
+     JOIN cp_runs original ON original.id = c.original_run_id
+     JOIN cp_runs challenged ON challenged.id = c.challenged_run_id
+     WHERE c.id = $2 LIMIT 1`,
+    [input.ownerHash, input.caseId],
+  ) as Array<Record<string, unknown>>;
+  const row = rows[0];
+  if (!row) throw new Error("CASE_NOT_FOUND");
+  const payload: PublicComparison = {
+    question: row.question as string,
+    answers: row.answers as string[],
+    originalInput: row.original_input as string,
+    challengeInput: row.challenge_input as string,
+    original: { selectedAnswer: row.original_answer as string, model: row.original_model as string, provider: row.original_provider as string | null, latencyMs: row.original_latency_ms as number },
+    challenged: { selectedAnswer: row.challenged_answer as string, model: row.challenged_model as string, provider: row.challenged_provider as string | null, latencyMs: row.challenged_latency_ms as number },
+    expectedAnswer: row.expected_answer as string,
+    meaningPreserved: row.meaning_preserved as boolean,
+    classification: row.status as string,
+    challengeKind: row.challenge_kind as string,
+  };
+  const id = randomBytes(18).toString("base64url");
+  await client().query(
+    "INSERT INTO cp_published_results (id, owner_hash, public_payload, expires_at) VALUES ($1, $2, $3::jsonb, now() + interval '30 days')",
+    [id, input.ownerHash, JSON.stringify(payload)],
+  );
+  return { id, payload, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() };
+}
+
+export async function getPublishedResult(id: string) {
+  await ensureSchema();
+  const rows = await client().query(
+    "SELECT public_payload, created_at, expires_at FROM cp_published_results WHERE id = $1 AND expires_at > now() LIMIT 1",
+    [id],
+  ) as Array<{ public_payload: PublicComparison; created_at: string; expires_at: string }>;
+  return rows[0] ? { payload: rows[0].public_payload, createdAt: rows[0].created_at, expiresAt: rows[0].expires_at } : null;
 }
 
 export async function getOwnedVersionAndCases(ownerHash: string, nodeId: string, versionId: string) {

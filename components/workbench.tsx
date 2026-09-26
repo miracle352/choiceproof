@@ -16,7 +16,8 @@ import type {
   PersistedCase,
   WorkspaceSnapshot,
 } from "@/lib/contracts";
-import { classifyChallengeReview, type LabelMapping } from "@/lib/domain";
+import { validateDecisionRequest } from "@/lib/contracts";
+import { classifyChallengeReview, repeatedRunDisagrees, type LabelMapping } from "@/lib/domain";
 
 const DecisionPathScene = dynamic(
   () => import("@/components/decision-path-scene").then((module) => module.DecisionPathScene),
@@ -24,7 +25,7 @@ const DecisionPathScene = dynamic(
 );
 
 type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean };
-type BusyState = "decision" | "propose" | "quick" | "compare" | "save" | "suggest" | "evaluate" | null;
+type BusyState = "decision" | "propose" | "quick" | "compare" | "save" | "publish" | "suggest" | "evaluate" | null;
 type RunState = "sample" | "not_tested" | "running" | "live" | "failed";
 type OperationError = { code: string; message: string };
 type MeasuredDecision = { result: DecisionSuccess; snapshot: DecisionSnapshot };
@@ -169,6 +170,10 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
   const [meaningPreserved, setMeaningPreserved] = useState<boolean | null>(null);
   const [setKind, setSetKind] = useState<"labeled" | "held_out">("labeled");
   const [savedComparisonKey, setSavedComparisonKey] = useState<string | null>(null);
+  const [savedCaseId, setSavedCaseId] = useState<string | null>(null);
+  const [publishConsent, setPublishConsent] = useState(false);
+  const [publishedPath, setPublishedPath] = useState<string | null>(null);
+  const [repeatDisagreement, setRepeatDisagreement] = useState<{ before: string; after: string } | null>(null);
   const [candidateQuestion, setCandidateQuestion] = useState(INITIAL.question);
   const [candidateAnswers, setCandidateAnswers] = useState(INITIAL.answers);
   const [candidateSource, setCandidateSource] = useState<"user" | "serv">("user");
@@ -284,16 +289,32 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
     });
   }
 
+  function validatedSnapshot() {
+    const snapshot = snapshotFromDraft(question, answers, originalInput);
+    const validation = validateDecisionRequest(snapshot);
+    if (!validation.success) {
+      setError({ code: "INVALID_INPUT", message: validation.message });
+      setRunState("failed");
+      return null;
+    }
+    return { ...validation.data };
+  }
+
   function updateAnswer(index: number, value: string) {
     setAnswers((current) => current.map((answer, itemIndex) => itemIndex === index ? value : answer));
   }
 
   async function testDecision() {
+    const snapshot = validatedSnapshot();
+    if (!snapshot) return;
+    const previous = decision;
     const operation = beginOperation("decision");
-    const snapshot = snapshotFromDraft(question, answers, originalInput);
     try {
       const result = await post<DecisionSuccess>("/api/decision", snapshot, operation.controller.signal);
       if (!isResponseCurrent(operation.requestId, latestRequestId.current)) return;
+      setRepeatDisagreement(previous && repeatedRunDisagrees({ sameSnapshot: sameDecisionSnapshot(previous.snapshot, snapshot), previousAnswer: previous.result.selectedAnswer, nextAnswer: result.selectedAnswer })
+        ? { before: previous.result.selectedAnswer, after: result.selectedAnswer }
+        : null);
       setDecision({ result, snapshot });
       setComparison(null);
       setRunState("live");
@@ -339,6 +360,9 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
     setExpectedAnswer("");
     setMeaningPreserved(null);
     setSavedComparisonKey(null);
+    setSavedCaseId(null);
+    setPublishConsent(false);
+    setPublishedPath(null);
     setCandidateQuestion(data.version.question);
     setCandidateAnswers(data.version.answers);
     setRunState("live");
@@ -392,8 +416,23 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
       if (!isResponseCurrent(operation.requestId, latestRequestId.current)) return;
       setCases((current) => [data.case, ...current.filter((item) => item.id !== data.case.id)]);
       setSavedComparisonKey(comparisonKey);
+      setSavedCaseId(data.case.id);
     } catch (cause) {
       captureError(cause, "The reviewed case could not be saved.", operation.requestId);
+    } finally {
+      finishOperation(operation.requestId);
+    }
+  }
+
+  async function publishCase() {
+    if (!savedCaseId || !publishConsent || publishedPath) return;
+    const operation = beginOperation("publish");
+    try {
+      const data = await post<{ ok: true; path: string; expiresAt: string }>("/api/publish", { caseId: savedCaseId, consent: true }, operation.controller.signal);
+      if (!isResponseCurrent(operation.requestId, latestRequestId.current)) return;
+      setPublishedPath(data.path);
+    } catch (cause) {
+      captureError(cause, "The share link could not be published.", operation.requestId);
     } finally {
       finishOperation(operation.requestId);
     }
@@ -444,7 +483,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
     <>
       <a className="skip-link" href="#workbench">Skip to workbench</a>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="FAULTLINE home"><span className="brand-mark" aria-hidden="true" /><span>FAULTLINE</span></a>
+        <a className="brand" href="#top" aria-label="Choiceproof home"><span className="brand-mark" aria-hidden="true" /><span>CHOICEPROOF</span></a>
         <nav aria-label="Product sections"><a href="#workbench">Test</a><a href="#cases">Cases</a><a href="#revision">Revisions</a></nav>
         <a className="header-cta" href="#workbench">Test a decision</a>
       </header>
@@ -452,9 +491,9 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
       <main id="top">
         <section className="hero" aria-labelledby="page-title">
           <div className="hero-copy">
-            <p className="eyebrow">BOUNDARY TESTING WITH SERV REASONING</p>
-            <h1 id="page-title">Know when the answer moves.</h1>
-            <p className="hero-summary">Test a bounded AI decision, change the evidence, and turn surprising results into repeatable cases.</p>
+            <p className="eyebrow">CHOICEPROOF / SERV REASONING</p>
+            <h1 id="page-title">Test the choice. Keep the proof.</h1>
+            <p className="hero-summary">A public workbench for testing bounded AI decisions against controlled changes—then saving what actually happened.</p>
             <div className="hero-actions"><a className="primary-link" href="#workbench">Test a decision <span aria-hidden="true">↘</span></a><span>Editable example included</span></div>
             <div className="worked-example" aria-label="Illustrative workflow example">
               <span>WORKED EXAMPLE · ILLUSTRATIVE</span>
@@ -504,6 +543,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
         {oneOffResult && <section className="decision-result" aria-labelledby="decision-result-title">
           <div className="section-title dark-title"><span>02</span><div><p>MEASURED DECISION</p><h2 id="decision-result-title" ref={resultHeadingRef} tabIndex={-1}>{servConfigured && decision ? "Live result" : "Illustrative result"}</h2></div><b className={`run-tag ${servConfigured && decision ? "tag-live" : "tag-sample"}`}>{servConfigured && decision ? "LIVE" : "SAMPLE · NOT LIVE"}</b></div>
           {decisionDraftChanged && <div className="stale-note"><strong>Draft changed after this run.</strong> The measured result below remains tied to the exact submitted question, answers, and input.</div>}
+          {repeatDisagreement && <div className="operation-error repeat-warning" role="alert"><span>DISAGREEMENT</span><div><strong>Repeated identical run changed answer</strong><p>{repeatDisagreement.before} → {repeatDisagreement.after}. Review both actual responses; neither run is silently discarded.</p></div></div>}
           <div className="single-result-grid"><div className="answer-focus"><small>SELECTED ANSWER</small><strong>{oneOffResult.result.selectedAnswer}</strong><p>{servConfigured && decision ? "Validated against the allowed answer set." : "Illustrative only. No SERV request occurred."}</p></div><ResultCard label={servConfigured && decision ? "ACTUAL SERV RESULT" : "SAMPLE RESULT"} result={oneOffResult.result} sample={!servConfigured || !decision} /></div>
           {servConfigured && decision && capabilities.canRunComparison && <div className="next-action"><div><span>Next · stress the same boundary</span><strong>Run a controlled evidence change.</strong></div><button className="secondary-button bright" type="button" onClick={runQuickChallenge} disabled={Boolean(busy)}>RUN A CONTROLLED CHALLENGE <span aria-hidden="true">↗</span></button></div>}
         </section>}
@@ -524,7 +564,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
         </section>
 
         {comparison && <section className="comparison-stage" aria-labelledby="comparison-title">
-          <div className="section-title dark-title"><span>04</span><div><p>THE FAULT LINE</p><h2 id="comparison-title">Exact change. Actual answers.</h2></div><b className="run-tag tag-live">LIVE COMPARISON</b></div>
+          <div className="section-title dark-title"><span>04</span><div><p>THE PROOF</p><h2 id="comparison-title">Exact change. Actual answers.</h2></div><b className="run-tag tag-live">LIVE COMPARISON</b></div>
           {comparisonDraftChanged && <div className="stale-note"><strong>Unsaved edits are not part of this result.</strong> The diff, answers, and saved case use the frozen input pair that SERV actually evaluated.</div>}
           <div className={`answer-comparison ${answersChanged ? "answer-changed" : "answer-stable"}`}><div><small>ORIGINAL</small><strong>{comparison.original.selectedAnswer}</strong></div><span aria-hidden="true">→</span><div><small>CHALLENGED</small><strong>{comparison.challenged.selectedAnswer}</strong></div><p>{answersChanged ? "ANSWER CHANGED · HUMAN REVIEW REQUIRED" : "ANSWER STABLE · HUMAN REVIEW STILL REQUIRED"}</p></div>
           <DiffView before={comparison.snapshot.originalInput} after={comparison.snapshot.challengeInput} />
@@ -536,6 +576,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
               <fieldset><legend>Does the meaning stay the same?</legend><div className="segmented"><button type="button" aria-pressed={meaningPreserved === true} className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Yes</button><button type="button" aria-pressed={meaningPreserved === false} className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>No</button></div></fieldset>
               <div><label htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled · can guide revisions</option><option value="held_out">Held-out · evaluation only</option></select></div>
               <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || meaningPreserved == null || Boolean(busy) || comparisonSaved}>{comparisonSaved ? "CASE SAVED" : busy === "save" ? "SAVING…" : "SAVE REVIEWED CASE"}</button>
+              {comparisonSaved && <div className="publish-control"><label><input type="checkbox" checked={publishConsent} onChange={(event) => setPublishConsent(event.target.checked)} disabled={Boolean(publishedPath)} /><span>I understand this synthetic input pair and its measured answers will be public for 30 days.</span></label>{publishedPath ? <a href={publishedPath}>Open published result ↗</a> : <button type="button" className="text-button" onClick={publishCase} disabled={!publishConsent || busy === "publish"}>{busy === "publish" ? "Publishing…" : "Publish a share link"}</button>}</div>}
             </div>
           </div>
         </section>}
@@ -548,7 +589,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
 
         <section className="revision-stage" id="revision" aria-labelledby="revision-title">
           <div className="section-title"><span>06</span><div><p>REVISION EVALUATION</p><h2 id="revision-title">Test the next decision version</h2></div><button className="secondary-button" type="button" onClick={suggestRevision} disabled={!capabilities.canEvaluateRevisions || Boolean(busy) || !cases.some((item) => item.setKind === "labeled" && item.meaningPreserved)}>{busy === "suggest" ? "SUGGESTING…" : "ASK SERV FOR A CANDIDATE"}</button></div>
-          <p className="revision-note">A SERV suggestion is only a candidate. FAULTLINE reruns the first 12 saved cases, including the held-out set, and shows every measured regression.</p>
+          <p className="revision-note">A SERV suggestion is only a candidate. Choiceproof reruns the first 12 saved cases, including the held-out set, and shows every measured regression.</p>
           <div className="version-comparison">
             <article><header><span>BASELINE</span><b>V{version?.versionNumber ?? 1}</b></header><p>{version?.question ?? question}</p><ul>{(version?.answers ?? answers).map((answer) => <li key={answer}>{answer}</li>)}</ul></article>
             <div className="version-divider" aria-hidden="true">→</div>
@@ -559,7 +600,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
           {evaluation && <div className="evaluation-report"><div className={`evaluation-summary ${evaluation.summary.regressions ? "has-regression" : "no-regression"}`}><span>MEASURED RESULT · VERSION {evaluation.candidateVersion.versionNumber}</span><strong>{evaluation.summary.regressions ? `${evaluation.summary.regressions} REGRESSION${evaluation.summary.regressions === 1 ? "" : "S"} DETECTED` : "NO REGRESSIONS IN THE EVALUATED CASES"}</strong><p>{evaluation.summary.evaluated} evaluated · {evaluation.summary.needsRelabeling} need relabeling · {evaluation.summary.notComparable} not comparable. Passing these cases is not a universal safety guarantee.</p></div><div className="evaluation-groups">{(["labeled", "held_out"] as const).map((kind) => <section key={kind}><h3>{kind === "labeled" ? "Labeled cases" : "Held-out cases"}</h3>{evaluation.results.filter((item) => item.setKind === kind).map((item) => <article className={`evaluation-row verdict-${item.verdict?.toLowerCase() ?? "relabel"}`} key={item.caseId}><span>{item.status === "NEEDS_RELABELING" ? "NEEDS RELABELING" : item.status === "NOT_COMPARABLE" ? "NOT COMPARABLE · SKIPPED" : item.verdict?.replaceAll("_", " ")}</span>{item.status === "EVALUATED" && <strong>{item.baselineAnswer} → {item.candidateAnswer}<small>expected {item.expectedAnswer}</small></strong>}</article>)}</section>)}</div></div>}
         </section>
 
-        <footer><div><strong>FAULTLINE</strong><span>Bounded decision testing with OpenServ SERV Reasoning v2.</span></div><div><span>Private by default</span><span>First 12 cases per evaluation</span><span>No universal safety claims</span></div></footer>
+        <footer><div><strong>CHOICEPROOF</strong><span>Test the choice. Keep the proof.</span></div><div><span>Private by default</span><span>40 run units / 5 minutes</span><span>First 12 cases per evaluation</span><span>No universal safety claims</span></div></footer>
       </main>
     </>
   );

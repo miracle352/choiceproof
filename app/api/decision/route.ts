@@ -1,50 +1,34 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { validateDecisionRequest, type DecisionFailure } from "@/lib/contracts";
-import { runServDecision, ServAdapterError } from "@/lib/serv";
+import { runServDecision } from "@/lib/serv";
+import { apiError, readJson } from "@/lib/api";
+import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
+import { enforceRunBudget } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json<DecisionFailure>(
-      { ok: false, error: { code: "INVALID_JSON", message: "Request body must be valid JSON." } },
-      { status: 400 },
-    );
-  }
+export async function POST(request: NextRequest) {
+  const owner = getOwnerIdentity(request);
+  const body = await readJson(request);
+  if (!body.ok) return attachOwnerCookie(body.response, owner);
 
-  const parsed = validateDecisionRequest(body);
+  const parsed = validateDecisionRequest(body.value);
   if (!parsed.success) {
-    return NextResponse.json<DecisionFailure>(
+    return attachOwnerCookie(NextResponse.json<DecisionFailure>(
       { ok: false, error: { code: "INVALID_INPUT", message: parsed.message } },
       { status: 400 },
-    );
+    ), owner);
   }
 
   try {
+    await enforceRunBudget(request, owner.hash, 1);
     const result = await runServDecision(parsed.data);
-    return NextResponse.json(result, {
+    return attachOwnerCookie(NextResponse.json(result, {
       status: 200,
       headers: { "Cache-Control": "no-store" },
-    });
+    }), owner);
   } catch (error) {
-    if (error instanceof ServAdapterError) {
-      return NextResponse.json<DecisionFailure>(
-        { ok: false, error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-
-    console.error("Unexpected decision route error", error);
-    return NextResponse.json<DecisionFailure>(
-      {
-        ok: false,
-        error: { code: "INTERNAL_ERROR", message: "The decision run failed unexpectedly." },
-      },
-      { status: 500 },
-    );
+    return attachOwnerCookie(apiError(error), owner);
   }
 }

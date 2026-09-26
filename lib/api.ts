@@ -3,10 +3,15 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { ServAdapterError } from "@/lib/serv";
 import { classifyDatabaseError, DatabaseAccessError } from "@/lib/db";
+import { RunBudgetError } from "@/lib/rate-limit";
 
 export type PublicApiError = { status: number; code: string; message: string };
+export const MAX_JSON_BODY_BYTES = 32_768;
 
 export function publicErrorFor(error: unknown): PublicApiError {
+  if (error instanceof RunBudgetError) {
+    return { status: 429, code: error.code, message: error.message };
+  }
   if (error instanceof ServAdapterError) {
     return { status: error.status, code: error.code, message: error.message };
   }
@@ -25,6 +30,7 @@ export function publicErrorFor(error: unknown): PublicApiError {
     NODE_NOT_FOUND: { status: 404, code, message: "Decision workspace was not found." },
     VERSION_NOT_FOUND: { status: 404, code, message: "Decision version was not found." },
     RUN_PAIR_NOT_FOUND: { status: 409, code, message: "The measured comparison could not be verified. Run the comparison again before saving." },
+    CASE_NOT_FOUND: { status: 404, code, message: "The saved case was not found in this browser workspace." },
   };
   return known[code] ?? { status: 500, code: "INTERNAL_ERROR", message: "The request failed unexpectedly." };
 }
@@ -39,8 +45,22 @@ export function apiError(error: unknown) {
 }
 
 export async function readJson(request: Request) {
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_JSON_BODY_BYTES) {
+    return { ok: false as const, response: NextResponse.json(
+      { ok: false, error: { code: "REQUEST_TOO_LARGE", message: "Request body exceeds the 32 KB public demo limit." } },
+      { status: 413 },
+    ) };
+  }
   try {
-    return { ok: true as const, value: await request.json() as unknown };
+    const text = await request.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_JSON_BODY_BYTES) {
+      return { ok: false as const, response: NextResponse.json(
+        { ok: false, error: { code: "REQUEST_TOO_LARGE", message: "Request body exceeds the 32 KB public demo limit." } },
+        { status: 413 },
+      ) };
+    }
+    return { ok: true as const, value: JSON.parse(text) as unknown };
   } catch {
     return { ok: false as const, response: NextResponse.json(
       { ok: false, error: { code: "INVALID_JSON", message: "Request body must be valid JSON." } },
