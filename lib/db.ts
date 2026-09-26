@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { stableCaseId } from "@/lib/case-id";
 import type { DecisionSuccess, DecisionVersion, PersistedCase, WorkspaceSnapshot } from "@/lib/contracts";
 import type { ChallengeKind, DecisionRequest } from "@/lib/contracts";
 import type { CaseSet, LabelMapping, ReviewClassification } from "@/lib/domain";
@@ -77,7 +78,6 @@ async function ensureSchema() {
         created_at timestamptz NOT NULL DEFAULT now()
       )`);
       await sql.query("CREATE INDEX IF NOT EXISTS cp_cases_node_set_idx ON cp_cases (node_id, set_kind, created_at DESC)");
-      await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS cp_cases_run_pair_unique ON cp_cases (original_run_id, challenged_run_id) WHERE original_run_id IS NOT NULL AND challenged_run_id IS NOT NULL");
     })().catch((error) => {
       schemaPromise = null;
       throw classifyDatabaseError(error);
@@ -277,7 +277,7 @@ export async function saveCase(input: {
     [input.originalRunId, input.challengedRunId],
   ) as CaseRow[];
   if (existing[0]) return toCase(existing[0]);
-  const id = randomUUID();
+  const id = stableCaseId(input);
   await sql.query(
     "INSERT INTO cp_cases (id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, original_run_id, challenged_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING",
     [id, input.nodeId, input.sourceVersionId, input.setKind, input.challengeKind, input.originalInput, input.challengeInput, input.originalAnswer, input.challengedAnswer, input.expectedAnswer, input.meaningPreserved, input.status, input.originalRunId, input.challengedRunId],
