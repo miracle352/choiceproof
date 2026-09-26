@@ -6,7 +6,7 @@
 
 **0:35–1:00** — Run a controlled challenge. Show both answers and the exact diff. “An answer change is a finding for review, not automatically failure.”
 
-**1:00–1:20** — Set expected answer and “same meaning,” then save. Saving uses the frozen stored run pair even after later edits.
+**1:00–1:20** — Confirm the expected answer and whether the edit intended to preserve or change the decision, then save. Jev, when available, is experiment triage only. Saving uses the frozen stored run pair even after later edits.
 
 **1:20–1:50** — Edit the candidate and rerun the first 12 cases. Show labeled/held-out groups, regressions, and NEEDS RELABELING. Held-out cases never enter the repair prompt.
 

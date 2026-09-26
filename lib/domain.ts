@@ -3,6 +3,7 @@ export type ReviewClassification =
   | "REVIEW_NEEDED"
   | "PASS"
   | "VERIFIED_FAILURE"
+  | "HUMAN_CONFIRMED_MISMATCH"
   | "NOT_COMPARABLE";
 
 export type CaseSet = "labeled" | "held_out";
@@ -13,8 +14,8 @@ export function isExpectedLabelValid(answers: string[], expectedAnswer: string) 
   return answers.includes(expectedAnswer);
 }
 
-export function revisionCaseDisposition(meaningPreserved: boolean) {
-  return meaningPreserved ? "READY" as const : "NOT_COMPARABLE" as const;
+export function revisionCaseDisposition(meaningPreserved: boolean, challengeIntent?: "preserve" | "change" | null) {
+  return challengeIntent || meaningPreserved ? "READY" as const : "NOT_COMPARABLE" as const;
 }
 
 export type EvaluationOutcome = {
@@ -37,6 +38,7 @@ export function buildReviewedCase<T extends MeasuredComparison>(input: {
   measured: T;
   expectedAnswer: string;
   meaningPreserved: boolean;
+  challengeIntent?: "preserve" | "change" | null;
 }) {
   return {
     ...input.measured,
@@ -47,6 +49,7 @@ export function buildReviewedCase<T extends MeasuredComparison>(input: {
       challengedAnswer: input.measured.challengedAnswer,
       expectedAnswer: input.expectedAnswer,
       meaningPreserved: input.meaningPreserved,
+      challengeIntent: input.challengeIntent,
     }),
   };
 }
@@ -56,11 +59,16 @@ export function classifyChallengeReview(input: {
   challengedAnswer: string;
   expectedAnswer?: string | null;
   meaningPreserved?: boolean | null;
+  challengeIntent?: "preserve" | "change" | null;
 }): ReviewClassification {
   const answerChanged = input.originalAnswer !== input.challengedAnswer;
 
-  if (!input.expectedAnswer || input.meaningPreserved == null) {
+  if (!input.expectedAnswer || (input.meaningPreserved == null && !input.challengeIntent)) {
     return answerChanged ? "ANSWER_CHANGED_REVIEW_NEEDED" : "REVIEW_NEEDED";
+  }
+
+  if (input.challengeIntent) {
+    return input.challengedAnswer === input.expectedAnswer ? "PASS" : "HUMAN_CONFIRMED_MISMATCH";
   }
 
   if (!input.meaningPreserved) return "NOT_COMPARABLE";

@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS cp_cases (
   challenged_answer text NOT NULL,
   expected_answer text NOT NULL,
   meaning_preserved boolean NOT NULL,
+  challenge_intent text CHECK (challenge_intent IN ('preserve', 'change')),
   status text NOT NULL,
   original_run_id text REFERENCES cp_runs(id),
   challenged_run_id text REFERENCES cp_runs(id),

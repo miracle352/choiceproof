@@ -38,6 +38,18 @@ export function isPersistenceConfigured() {
   return Boolean(databaseUrl());
 }
 
+export async function checkPersistenceHealth() {
+  if (!isPersistenceConfigured()) return { configured: false as const, status: "not_configured" as const };
+  try {
+    await ensureSchema();
+    await client().query("SELECT 1 AS healthy");
+    return { configured: true as const, status: "available" as const };
+  } catch (error) {
+    const issue = classifyDatabaseError(error);
+    return { configured: true as const, status: "failed" as const, code: issue.code };
+  }
+}
+
 function client(): NeonQueryFunction<false, false> {
   const url = databaseUrl();
   if (!url) throw new Error("DATABASE_NOT_CONFIGURED");
@@ -78,6 +90,7 @@ async function ensureSchema() {
         created_at timestamptz NOT NULL DEFAULT now()
       )`);
       await sql.query("CREATE INDEX IF NOT EXISTS cp_cases_node_set_idx ON cp_cases (node_id, set_kind, created_at DESC)");
+      await sql.query("ALTER TABLE cp_cases ADD COLUMN IF NOT EXISTS challenge_intent text CHECK (challenge_intent IN ('preserve', 'change'))");
       await sql.query(`CREATE TABLE IF NOT EXISTS cp_rate_limits (
         bucket_key text NOT NULL, window_id bigint NOT NULL, units integer NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (bucket_key, window_id)
@@ -139,6 +152,7 @@ type CaseRow = {
   challenged_answer: string;
   expected_answer: string;
   meaning_preserved: boolean;
+  challenge_intent: "preserve" | "change" | null;
   status: string;
   created_at: string;
 };
@@ -156,6 +170,7 @@ function toCase(row: CaseRow): PersistedCase {
     challengedAnswer: row.challenged_answer,
     expectedAnswer: row.expected_answer,
     meaningPreserved: row.meaning_preserved,
+    challengeIntent: row.challenge_intent,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -179,7 +194,7 @@ export async function getWorkspace(ownerHash: string): Promise<WorkspaceSnapshot
     [node.id],
   ) as VersionRow[];
   const cases = await sql.query(
-    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE node_id = $1 ORDER BY created_at DESC LIMIT 50",
+    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, challenge_intent, status, created_at FROM cp_cases WHERE node_id = $1 ORDER BY created_at DESC LIMIT 50",
     [node.id],
   ) as CaseRow[];
   return {
@@ -283,6 +298,7 @@ export async function saveCase(input: {
   challengedAnswer: string;
   expectedAnswer: string;
   meaningPreserved: boolean;
+  challengeIntent: "preserve" | "change";
   status: ReviewClassification;
   originalRunId: string;
   challengedRunId: string;
@@ -292,17 +308,17 @@ export async function saveCase(input: {
   const owned = await sql.query("SELECT id FROM cp_nodes WHERE id = $1 AND owner_hash = $2", [input.nodeId, input.ownerHash]);
   if (!owned.length) throw new Error("NODE_NOT_FOUND");
   const existing = await sql.query(
-    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE original_run_id = $1 AND challenged_run_id = $2 LIMIT 1",
+    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, challenge_intent, status, created_at FROM cp_cases WHERE original_run_id = $1 AND challenged_run_id = $2 LIMIT 1",
     [input.originalRunId, input.challengedRunId],
   ) as CaseRow[];
   if (existing[0]) return toCase(existing[0]);
   const id = stableCaseId(input);
   await sql.query(
-    "INSERT INTO cp_cases (id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, original_run_id, challenged_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING",
-    [id, input.nodeId, input.sourceVersionId, input.setKind, input.challengeKind, input.originalInput, input.challengeInput, input.originalAnswer, input.challengedAnswer, input.expectedAnswer, input.meaningPreserved, input.status, input.originalRunId, input.challengedRunId],
+    "INSERT INTO cp_cases (id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, challenge_intent, status, original_run_id, challenged_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING",
+    [id, input.nodeId, input.sourceVersionId, input.setKind, input.challengeKind, input.originalInput, input.challengeInput, input.originalAnswer, input.challengedAnswer, input.expectedAnswer, input.meaningPreserved, input.challengeIntent, input.status, input.originalRunId, input.challengedRunId],
   );
   const rows = await sql.query(
-    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE (id = $1) OR (original_run_id = $2 AND challenged_run_id = $3) ORDER BY (id = $1) DESC LIMIT 1",
+    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, challenge_intent, status, created_at FROM cp_cases WHERE (id = $1) OR (original_run_id = $2 AND challenged_run_id = $3) ORDER BY (id = $1) DESC LIMIT 1",
     [id, input.originalRunId, input.challengedRunId],
   ) as CaseRow[];
   return toCase(rows[0]);
@@ -371,6 +387,7 @@ export type PublicComparison = {
   challenged: { selectedAnswer: string; model: string; provider: string | null; latencyMs: number };
   expectedAnswer: string;
   meaningPreserved: boolean;
+  challengeIntent: "preserve" | "change" | null;
   classification: string;
   challengeKind: string;
 };
@@ -378,7 +395,7 @@ export type PublicComparison = {
 export async function publishOwnedCase(input: { ownerHash: string; caseId: string }) {
   await ensureSchema();
   const rows = await client().query(
-    `SELECT c.expected_answer, c.meaning_preserved, c.status, c.challenge_kind,
+    `SELECT c.expected_answer, c.meaning_preserved, c.challenge_intent, c.status, c.challenge_kind,
        v.question, v.answers,
        original.input_text AS original_input, original.selected_answer AS original_answer,
        original.model AS original_model, original.provider AS original_provider, original.latency_ms AS original_latency_ms,
@@ -403,6 +420,7 @@ export async function publishOwnedCase(input: { ownerHash: string; caseId: strin
     challenged: { selectedAnswer: row.challenged_answer as string, model: row.challenged_model as string, provider: row.challenged_provider as string | null, latencyMs: row.challenged_latency_ms as number },
     expectedAnswer: row.expected_answer as string,
     meaningPreserved: row.meaning_preserved as boolean,
+    challengeIntent: (row.challenge_intent as "preserve" | "change" | null) ?? null,
     classification: row.status as string,
     challengeKind: row.challenge_kind as string,
   };
@@ -434,7 +452,7 @@ export async function getOwnedVersionAndCases(ownerHash: string, nodeId: string,
   ) as VersionRow[];
   if (!versions[0]) throw new Error("VERSION_NOT_FOUND");
   const cases = await sql.query(
-    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, status, created_at FROM cp_cases WHERE node_id = $1 ORDER BY created_at ASC LIMIT 12",
+    "SELECT id, node_id, source_version_id, set_kind, challenge_kind, original_input, challenge_input, original_answer, challenged_answer, expected_answer, meaning_preserved, challenge_intent, status, created_at FROM cp_cases WHERE node_id = $1 ORDER BY created_at ASC LIMIT 12",
     [nodeId],
   ) as CaseRow[];
   return { version: toVersion(versions[0]), cases: cases.map(toCase) };

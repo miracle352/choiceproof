@@ -51,6 +51,24 @@ describe("challenge review classification", () => {
       }),
     ).toBe("NOT_COMPARABLE");
   });
+
+  it("uses a neutral human-confirmed mismatch for an explicitly labeled challenge intent", () => {
+    expect(classifyChallengeReview({
+      originalAnswer: "Approve",
+      challengedAnswer: "Decline",
+      expectedAnswer: "Approve",
+      meaningPreserved: true,
+      challengeIntent: "preserve",
+    })).toBe("HUMAN_CONFIRMED_MISMATCH");
+
+    expect(classifyChallengeReview({
+      originalAnswer: "Approve",
+      challengedAnswer: "Decline",
+      expectedAnswer: "Decline",
+      meaningPreserved: false,
+      challengeIntent: "change",
+    })).toBe("PASS");
+  });
 });
 
 describe("label migration", () => {
@@ -85,6 +103,7 @@ describe("revision evaluation", () => {
   it("skips reviewer-marked non-comparable cases instead of crediting a pass or failure", () => {
     expect(revisionCaseDisposition(false)).toBe("NOT_COMPARABLE");
     expect(revisionCaseDisposition(true)).toBe("READY");
+    expect(revisionCaseDisposition(false, "change")).toBe("READY");
   });
 
   it("reports a repair that improves one case but regresses another", () => {

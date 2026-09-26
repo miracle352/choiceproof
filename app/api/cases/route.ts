@@ -23,6 +23,9 @@ export async function POST(request: NextRequest) {
   if (typeof value.meaningPreserved !== "boolean") {
     return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_INPUT", message: "Meaning-preserved must be explicitly marked." } }, { status: 400 }), owner);
   }
+  if (value.challengeIntent !== "preserve" && value.challengeIntent !== "change") {
+    return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "INVALID_INPUT", message: "Challenge intent must be explicitly marked as preserve or change." } }, { status: 400 }), owner);
+  }
   const setKind: CaseSet = value.setKind === "held_out" ? "held_out" : "labeled";
   const challengeKind: ChallengeKind = typeof value.challengeKind === "string" && (value.challengeKind === "manual" || CHALLENGE_KINDS.includes(value.challengeKind as never)) ? value.challengeKind as ChallengeKind : "manual";
 
@@ -41,6 +44,7 @@ export async function POST(request: NextRequest) {
       measured,
       expectedAnswer: value.expectedAnswer as string,
       meaningPreserved: value.meaningPreserved,
+      challengeIntent: value.challengeIntent,
     });
     const saved = await saveCase({
       ownerHash: owner.hash,
@@ -54,6 +58,7 @@ export async function POST(request: NextRequest) {
       challengedAnswer: reviewed.challengedAnswer,
       expectedAnswer: reviewed.expectedAnswer,
       meaningPreserved: reviewed.meaningPreserved,
+      challengeIntent: value.challengeIntent,
       status: reviewed.status,
       originalRunId: value.originalRunId as string,
       challengedRunId: value.challengedRunId as string,

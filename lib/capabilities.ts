@@ -1,6 +1,6 @@
 export type PersistenceHealth = "not_configured" | "checking" | "available" | "failed";
 
-export type ProductMode = "sample" | "decision_only" | "full";
+export type ProductMode = "sample" | "initializing" | "decision_only" | "full";
 
 export function resolveProductCapabilities(input: {
   servConfigured: boolean;
@@ -11,6 +11,8 @@ export function resolveProductCapabilities(input: {
   const canPersist = input.databaseConfigured && input.persistenceHealth === "available";
   const mode: ProductMode = !input.servConfigured
     ? "sample"
+    : input.databaseConfigured && input.persistenceHealth === "checking"
+      ? "initializing"
     : canPersist
       ? "full"
       : "decision_only";

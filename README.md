@@ -7,7 +7,7 @@
 1. Edit the question, 2–5 distinct answers, or synthetic input.
 2. Select **Test a decision**, then **Run a controlled challenge**.
 3. Read the exact diff and both actual SERV results.
-4. Choose the expected answer and whether both inputs retain the same meaning; save the case.
+4. Confirm the expected answer and whether the edit was intended to preserve or change the decision; save the case.
 5. Edit or request a revision candidate and rerun the first 12 saved cases.
 
 A changed answer starts as **ANSWER CHANGED — REVIEW NEEDED**. It is not a verified failure until a human supplies both labels. Passing tests are not a universal safety guarantee.
@@ -30,6 +30,8 @@ No key gives a labeled read-only sample. `SERV_API_KEY` enables live one-off dec
 | `DATABASE_URL` | Persistent workflow | PostgreSQL/Neon connection string |
 | `SERV_MODEL` | No | Defaults to `gpt-5.4-mini` |
 | `SERV_TIMEOUT_MS` | No | 5–60 seconds; default 30 seconds |
+| `OPENJEV_API_KEY` | No | Server-only Jev experiment-analysis credential; comparisons still work without it |
+| `OPENJEV_MODEL` | No | Defaults to Jev's documented `openjev` model |
 | `RATE_LIMIT_SALT` | Recommended | Salts forwarded-address hashes |
 
 The demo accepts at most 32 KB/request, 1 MB/SERV response, and 40 weighted run units per anonymous owner/address every five minutes. Decisions and proposals cost 1, comparisons 2, and evaluation 2 per comparable case. Without PostgreSQL, limiting is best-effort per warm instance.

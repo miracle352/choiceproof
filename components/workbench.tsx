@@ -14,6 +14,7 @@ import type {
   DecisionSuccess,
   DecisionVersion,
   PersistedCase,
+  JevAnalysis,
   WorkspaceSnapshot,
 } from "@/lib/contracts";
 import { validateDecisionRequest } from "@/lib/contracts";
@@ -24,11 +25,17 @@ const DecisionPathScene = dynamic(
   { ssr: false, loading: () => <div className="path-scene path-scene-loading" aria-hidden="true" /> },
 );
 
-type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean };
+type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean; jevConfigured: boolean };
 type BusyState = "decision" | "propose" | "quick" | "compare" | "save" | "publish" | "suggest" | "evaluate" | null;
 type RunState = "sample" | "not_tested" | "running" | "live" | "failed";
 type OperationError = { code: string; message: string };
 type MeasuredDecision = { result: DecisionSuccess; snapshot: DecisionSnapshot };
+type JevUiState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "unavailable"; reason: string }
+  | { status: "failed"; code: string; reason: string }
+  | JevAnalysis;
 
 type EvaluationItem = {
   caseId: string;
@@ -152,7 +159,7 @@ function StatusItem({ label, value, tone = "neutral" }: { label: string; value: 
   return <span className={`status-item status-${tone}`}><small>{label}</small><b>{value}</b></span>;
 }
 
-export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps) {
+export function Workbench({ servConfigured, databaseConfigured, jevConfigured }: WorkbenchProps) {
   const [question, setQuestion] = useState(INITIAL.question);
   const [answers, setAnswers] = useState(INITIAL.answers);
   const [originalInput, setOriginalInput] = useState(INITIAL.input);
@@ -166,7 +173,9 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
   const [cases, setCases] = useState<PersistedCase[]>([]);
   const [persistenceHealth, setPersistenceHealth] = useState<PersistenceHealth>(databaseConfigured ? "checking" : "not_configured");
   const [workspaceError, setWorkspaceError] = useState<OperationError | null>(null);
+  const [workspaceRefresh, setWorkspaceRefresh] = useState(0);
   const [expectedAnswer, setExpectedAnswer] = useState("");
+  const [expectedConfirmed, setExpectedConfirmed] = useState(false);
   const [meaningPreserved, setMeaningPreserved] = useState<boolean | null>(null);
   const [setKind, setSetKind] = useState<"labeled" | "held_out">("labeled");
   const [savedComparisonKey, setSavedComparisonKey] = useState<string | null>(null);
@@ -182,9 +191,12 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
   const [busy, setBusy] = useState<BusyState>(null);
   const [runState, setRunState] = useState<RunState>(servConfigured ? "not_tested" : "sample");
   const [error, setError] = useState<OperationError | null>(null);
+  const [jevState, setJevState] = useState<JevUiState>({ status: "idle" });
   const latestRequestId = useRef(0);
   const activeController = useRef<AbortController | null>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
+  const jevController = useRef<AbortController | null>(null);
+  const jevRequestId = useRef(0);
 
   const draftSnapshot = useMemo(() => snapshotFromDraft(question, answers, originalInput), [question, answers, originalInput]);
   const capabilities = resolveProductCapabilities({ servConfigured, databaseConfigured, persistenceHealth });
@@ -193,6 +205,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
     challengedAnswer: comparison.challenged.selectedAnswer,
     expectedAnswer: expectedAnswer || null,
     meaningPreserved,
+    challengeIntent: meaningPreserved == null ? null : meaningPreserved ? "preserve" : "change",
   }) : null;
   const comparisonKey = comparison ? `${comparison.originalRunId}:${comparison.challengedRunId}` : null;
   const comparisonSaved = Boolean(comparisonKey && comparisonKey === savedComparisonKey);
@@ -209,7 +222,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
     ? "sample"
     : error
       ? "failed"
-      : reviewStatus === "VERIFIED_FAILURE"
+      : reviewStatus === "VERIFIED_FAILURE" || reviewStatus === "HUMAN_CONFIRMED_MISMATCH"
         ? "verified"
         : comparison
           ? answersChanged ? "changed" : "stable"
@@ -253,7 +266,13 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
         setWorkspaceError(issue);
       });
     return () => controller.abort();
-  }, [databaseConfigured]);
+  }, [databaseConfigured, workspaceRefresh]);
+
+  function retryWorkspace() {
+    setPersistenceHealth("checking");
+    setWorkspaceError(null);
+    setWorkspaceRefresh((value) => value + 1);
+  }
 
   function beginOperation(kind: Exclude<BusyState, null>) {
     activeController.current?.abort();
@@ -287,6 +306,30 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
       body: JSON.stringify(body),
       signal,
     });
+  }
+
+  async function requestJevAnalysis(measured: ComparisonSuccess) {
+    jevController.current?.abort();
+    const controller = new AbortController();
+    jevController.current = controller;
+    const requestId = ++jevRequestId.current;
+    setJevState({ status: "loading" });
+    try {
+      const data = await post<{ ok: true; analysis: JevUiState }>("/api/analysis", {
+        nodeId: measured.nodeId,
+        versionId: measured.version.id,
+        originalRunId: measured.originalRunId,
+        challengedRunId: measured.challengedRunId,
+      }, controller.signal);
+      if (requestId === jevRequestId.current) setJevState(data.analysis);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      if (requestId !== jevRequestId.current) return;
+      const issue = cause instanceof ApiRequestError
+        ? { code: cause.code, reason: cause.message }
+        : { code: "JEV_REQUEST_FAILED", reason: "Jev analysis could not be loaded." };
+      setJevState({ status: "failed", ...issue });
+    }
   }
 
   function validatedSnapshot() {
@@ -354,10 +397,12 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
     }, operation.controller.signal);
     if (!isResponseCurrent(operation.requestId, latestRequestId.current)) return;
     setComparison(data);
+    void requestJevAnalysis(data);
     setDecision({ result: data.original, snapshot: { question: data.snapshot.question, answers: data.snapshot.answers, input: data.snapshot.originalInput } });
     setNodeId(data.nodeId);
     setVersion(data.version);
-    setExpectedAnswer("");
+    setExpectedAnswer(data.original.selectedAnswer);
+    setExpectedConfirmed(false);
     setMeaningPreserved(null);
     setSavedComparisonKey(null);
     setSavedCaseId(null);
@@ -400,7 +445,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
   }
 
   async function saveLabeledCase() {
-    if (!comparison || !expectedAnswer || meaningPreserved == null || comparisonSaved) return;
+    if (!comparison || !expectedAnswer || !expectedConfirmed || meaningPreserved == null || comparisonSaved) return;
     const operation = beginOperation("save");
     try {
       const data = await post<{ ok: true; case: PersistedCase }>("/api/cases", {
@@ -410,6 +455,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
         challengeKind: comparison.challengeKind,
         expectedAnswer,
         meaningPreserved,
+        challengeIntent: meaningPreserved ? "preserve" : "change",
         originalRunId: comparison.originalRunId,
         challengedRunId: comparison.challengedRunId,
       }, operation.controller.signal);
@@ -477,7 +523,9 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
   }
 
   const fieldsDisabled = !servConfigured || Boolean(busy);
-  const oneOffResult = decision ?? (!servConfigured ? { result: SAMPLE, snapshot: INITIAL } : null);
+  const oneOffResult = decision ?? { result: SAMPLE, snapshot: INITIAL };
+  const isPrefilledExample = sameDecisionSnapshot(draftSnapshot, INITIAL);
+  const runStateLabel = runState === "running" ? "LOADING" : runState === "not_tested" ? "NOT TESTED" : runState.toUpperCase();
 
   return (
     <>
@@ -497,7 +545,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
             <div className="hero-actions"><a className="primary-link" href="#workbench">Test a decision <span aria-hidden="true">↘</span></a><span>Editable example included</span></div>
             <div className="worked-example" aria-label="Illustrative workflow example">
               <span>WORKED EXAMPLE · ILLUSTRATIVE</span>
-              <p><b>Late delivery</b><i aria-hidden="true">→</i><strong>Approve</strong><i aria-hidden="true">→</i><b>Conflicting tracking</b><i aria-hidden="true">→</i><strong>Review</strong></p>
+              <p><b>Late delivery</b><i aria-hidden="true">→</i><strong>Approve</strong><i aria-hidden="true">→</i><b>Conflicting tracking</b><i aria-hidden="true">→</i><strong>Escalate</strong></p>
             </div>
           </div>
           <DecisionPathScene state={sceneState} originalAnswer={comparison?.original.selectedAnswer ?? decision?.result.selectedAnswer} challengedAnswer={comparison?.challenged.selectedAnswer} />
@@ -506,13 +554,15 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
         <section className="system-strip" aria-label="Configuration and run status">
           <StatusItem label="SERV configuration" value={servConfigured ? "Configured" : "Missing"} tone={servConfigured ? "neutral" : "warning"} />
           <StatusItem label="Workspace configuration" value={databaseConfigured ? "Configured" : "Not configured"} tone="neutral" />
-          <StatusItem label="Workspace health" value={persistenceHealth.replaceAll("_", " ")} tone={persistenceHealth === "available" ? "good" : persistenceHealth === "failed" ? "error" : "neutral"} />
-          <StatusItem label="Last run" value={runState.replaceAll("_", " ")} tone={runState === "live" ? "good" : runState === "failed" ? "error" : runState === "sample" ? "warning" : "neutral"} />
+          <StatusItem label="Workspace health" value={persistenceHealth === "checking" ? "LOADING" : persistenceHealth.replaceAll("_", " ")} tone={persistenceHealth === "available" ? "good" : persistenceHealth === "failed" ? "error" : "neutral"} />
+          <StatusItem label="Jev analysis" value={jevConfigured ? "Configured" : "Unavailable"} tone={jevConfigured ? "neutral" : "warning"} />
+          <StatusItem label="Last run" value={runStateLabel} tone={runState === "live" ? "good" : runState === "failed" ? "error" : runState === "sample" ? "warning" : "neutral"} />
         </section>
 
         {!servConfigured && <aside className="mode-notice notice-sample" role="status"><strong>SAMPLE MODE · READ ONLY</strong><p>No SERV key is configured. The result below is illustrative and no API request occurred.</p></aside>}
+        {servConfigured && capabilities.mode === "initializing" && <aside className="mode-notice" role="status"><strong>WORKSPACE · LOADING</strong><p>Checking the database and private anonymous workspace. Live one-off decisions are already available.</p></aside>}
         {servConfigured && capabilities.mode === "decision_only" && <aside className="mode-notice" role="status"><strong>ONE-OFF LIVE MODE</strong><p>Real SERV decisions are available. Challenge comparison, saved cases, and revision evaluation require a healthy database connection.</p></aside>}
-        {workspaceError && <aside className="mode-notice notice-error" role="alert"><strong>{workspaceError.code.replaceAll("_", " ")}</strong><p>{workspaceError.message}</p></aside>}
+        {workspaceError && <aside className="mode-notice notice-error" role="alert"><strong>{workspaceError.code.replaceAll("_", " ")}</strong><p>{workspaceError.message}</p><button className="secondary-button" type="button" onClick={retryWorkspace}>RETRY WORKSPACE</button></aside>}
 
         <section className="workbench" id="workbench" aria-labelledby="workbench-title" aria-busy={Boolean(busy)}>
           <div className="section-title"><span>01</span><div><p>DEFINE THE BOUNDARY</p><h2 id="workbench-title">Test a decision</h2></div><small>2–5 allowed answers · replace every field</small></div>
@@ -533,20 +583,20 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
             </div>
           </div>
           <div className="primary-action-row">
-            <div><strong>Start with the real decision.</strong><span>One SERV request. No database required.</span></div>
-            <button className="primary-button" type="button" onClick={testDecision} disabled={!capabilities.canRunDecision || Boolean(busy) || !originalInput.trim()}>{busy === "decision" ? "TESTING…" : "TEST A DECISION"}<span aria-hidden="true">↗</span></button>
+            <div><strong>{isPrefilledExample ? "Run the worked example for real." : "Run this bounded decision."}</strong><span>One real SERV request. No database required.</span></div>
+            <button className="primary-button" type="button" onClick={testDecision} disabled={!capabilities.canRunDecision || Boolean(busy) || !originalInput.trim()}>{busy === "decision" ? "LOADING…" : isPrefilledExample ? "RUN THIS EXAMPLE LIVE" : "RUN LIVE DECISION"}<span aria-hidden="true">↗</span></button>
           </div>
           {busyLabel && <div className="operation-status" role="status" aria-live="polite"><i aria-hidden="true" /><span>{busyLabel}</span></div>}
           {error && <div className="operation-error" role="alert"><span>FAILED</span><div><strong>{error.code.replaceAll("_", " ")}</strong><p>{error.message}</p></div></div>}
         </section>
 
-        {oneOffResult && <section className="decision-result" aria-labelledby="decision-result-title">
+        <section className="decision-result" aria-labelledby="decision-result-title">
           <div className="section-title dark-title"><span>02</span><div><p>MEASURED DECISION</p><h2 id="decision-result-title" ref={resultHeadingRef} tabIndex={-1}>{servConfigured && decision ? "Live result" : "Illustrative result"}</h2></div><b className={`run-tag ${servConfigured && decision ? "tag-live" : "tag-sample"}`}>{servConfigured && decision ? "LIVE" : "SAMPLE · NOT LIVE"}</b></div>
           {decisionDraftChanged && <div className="stale-note"><strong>Draft changed after this run.</strong> The measured result below remains tied to the exact submitted question, answers, and input.</div>}
           {repeatDisagreement && <div className="operation-error repeat-warning" role="alert"><span>DISAGREEMENT</span><div><strong>Repeated identical run changed answer</strong><p>{repeatDisagreement.before} → {repeatDisagreement.after}. Review both actual responses; neither run is silently discarded.</p></div></div>}
           <div className="single-result-grid"><div className="answer-focus"><small>SELECTED ANSWER</small><strong>{oneOffResult.result.selectedAnswer}</strong><p>{servConfigured && decision ? "Validated against the allowed answer set." : "Illustrative only. No SERV request occurred."}</p></div><ResultCard label={servConfigured && decision ? "ACTUAL SERV RESULT" : "SAMPLE RESULT"} result={oneOffResult.result} sample={!servConfigured || !decision} /></div>
           {servConfigured && decision && capabilities.canRunComparison && <div className="next-action"><div><span>Next · stress the same boundary</span><strong>Run a controlled evidence change.</strong></div><button className="secondary-button bright" type="button" onClick={runQuickChallenge} disabled={Boolean(busy)}>RUN A CONTROLLED CHALLENGE <span aria-hidden="true">↗</span></button></div>}
-        </section>}
+        </section>
 
         <section className="challenge-stage" aria-labelledby="challenge-title">
           <div className="section-title"><span>03</span><div><p>CONTROLLED CHALLENGE</p><h2 id="challenge-title">Change one thing. Compare both answers.</h2></div><small>{capabilities.canRunComparison ? "Persistence ready" : "Requires a healthy workspace"}</small></div>
@@ -554,28 +604,39 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
           <div className="challenge-types" aria-label="Challenge type guide">
             {(Object.keys(KIND_HELP) as ChallengeKind[]).filter((kind) => kind !== "manual").map((kind) => <div key={kind}><strong>{KIND_LABELS[kind]}</strong><span>{KIND_HELP[kind]}</span></div>)}
           </div>
-          {proposals.length > 0 && <div className="challenge-editor">
-            <div className="proposal-tabs" role="tablist" aria-label="Generated challenges">{proposals.map((proposal) => <button role="tab" aria-selected={challengeKind === proposal.kind} className={challengeKind === proposal.kind ? "active" : ""} key={proposal.kind} onClick={() => { setChallengeKind(proposal.kind); setChallengeInput(proposal.input); }}><span>{KIND_LABELS[proposal.kind]}</span><small>{proposal.label}</small></button>)}</div>
+          <div className="challenge-editor">
+            {proposals.length > 0 && <div className="proposal-tabs" role="tablist" aria-label="Generated challenges">{proposals.map((proposal) => <button role="tab" aria-selected={challengeKind === proposal.kind} className={challengeKind === proposal.kind ? "active" : ""} key={proposal.kind} onClick={() => { setChallengeKind(proposal.kind); setChallengeInput(proposal.input); }}><span>{KIND_LABELS[proposal.kind]}</span><small>{proposal.label}</small></button>)}</div>}
             <div className="field-heading"><label htmlFor="challenge-input">Challenged input</label><button className="text-button" type="button" onClick={() => { setChallengeKind("manual"); setChallengeInput(originalInput); }}>Write manually</button></div>
             <textarea className="mono" id="challenge-input" rows={7} value={challengeInput} onChange={(event) => { setChallengeKind("manual"); setChallengeInput(event.target.value); }} disabled={fieldsDisabled} />
             <button className="primary-button compare-button" type="button" onClick={runComparison} disabled={!capabilities.canRunComparison || Boolean(busy) || challengeInput.trim() === originalInput.trim()}>{busy === "compare" ? "RUNNING BOTH INPUTS…" : "COMPARE ORIGINAL + CHALLENGE"}<span aria-hidden="true">↗</span></button>
-          </div>}
-          {!capabilities.canRunComparison && <div className="locked-row"><strong>Comparison is unavailable.</strong><span>{!servConfigured ? "Configure SERV_API_KEY first." : persistenceHealth === "failed" ? "Fix the database connection or schema error shown above." : "Configure DATABASE_URL to persist the two measured runs."}</span></div>}
+          </div>
+          {!capabilities.canRunComparison && <div className="locked-row"><strong>Comparison is unavailable.</strong><span>{!servConfigured ? "Configure SERV_API_KEY first." : persistenceHealth === "checking" ? "The private workspace is still loading." : persistenceHealth === "failed" ? "Fix the database connection or schema error shown above." : "Configure DATABASE_URL to persist the two measured runs."}</span></div>}
         </section>
 
         {comparison && <section className="comparison-stage" aria-labelledby="comparison-title">
           <div className="section-title dark-title"><span>04</span><div><p>THE PROOF</p><h2 id="comparison-title">Exact change. Actual answers.</h2></div><b className="run-tag tag-live">LIVE COMPARISON</b></div>
           {comparisonDraftChanged && <div className="stale-note"><strong>Unsaved edits are not part of this result.</strong> The diff, answers, and saved case use the frozen input pair that SERV actually evaluated.</div>}
           <div className={`answer-comparison ${answersChanged ? "answer-changed" : "answer-stable"}`}><div><small>ORIGINAL</small><strong>{comparison.original.selectedAnswer}</strong></div><span aria-hidden="true">→</span><div><small>CHALLENGED</small><strong>{comparison.challenged.selectedAnswer}</strong></div><p>{answersChanged ? "ANSWER CHANGED · HUMAN REVIEW REQUIRED" : "ANSWER STABLE · HUMAN REVIEW STILL REQUIRED"}</p></div>
+          <div className="input-snapshots">
+            <article><span>ORIGINAL INPUT · MEASURED</span><pre>{comparison.snapshot.originalInput}</pre></article>
+            <article><span>CHALLENGED INPUT · MEASURED</span><pre>{comparison.snapshot.challengeInput}</pre></article>
+          </div>
           <DiffView before={comparison.snapshot.originalInput} after={comparison.snapshot.challengeInput} />
           <div className="result-pair"><ResultCard label="ORIGINAL RESULT" result={comparison.original} /><ResultCard label="CHALLENGED RESULT" result={comparison.challenged} /></div>
+          <section className="jev-panel" aria-live="polite" aria-label="Jev experiment analysis">
+            <div className="jev-heading"><div><span>JEV · EXPERIMENT ANALYSIS</span><strong>{jevState.status === "live" ? "LIVE" : jevState.status === "loading" ? "LOADING" : jevState.status === "failed" ? "FAILED" : "UNAVAILABLE"}</strong></div><p>Jev reviews the experiment only. It never selects a refund verdict, supplies the human label, saves a case, or enters SERV’s revision prompt.</p></div>
+            {jevState.status === "loading" && <p className="jev-message">Analyzing the observed hold or flip and the apparent relevance of the edit…</p>}
+            {jevState.status === "unavailable" && <p className="jev-message">Unavailable. {jevState.reason}</p>}
+            {jevState.status === "failed" && <div className="jev-message"><p><b>{jevState.code.replaceAll("_", " ")}</b> · {jevState.reason}</p><button className="secondary-button" type="button" onClick={() => void requestJevAnalysis(comparison)}>RETRY JEV ANALYSIS</button></div>}
+            {jevState.status === "live" && <><dl className="jev-results"><div><dt>Observed behavior</dt><dd>{jevState.observedBehavior}</dd><small>Derived from the actual SERV answers</small></div><div><dt>Apparent edit relevance</dt><dd>{jevState.apparentRelevance.replaceAll("_", " ")}</dd></div><div><dt>Review priority</dt><dd>{jevState.reviewPriority}</dd></div><div><dt>Model / latency</dt><dd>{jevState.model} · {jevState.latencyMs.toLocaleString()} ms</dd></div></dl><details><summary>Actual Jev returned data</summary><pre>{JSON.stringify(jevState.raw, null, 2)}</pre></details></>}
+          </section>
           <div className="review-block">
-            <div className="review-copy"><span>REVIEW STATUS</span><strong>{reviewStatus?.replaceAll("_", " ")}</strong><p>“Same meaning” means the challenge still describes the same underlying case. If it changes what the correct answer should be, choose No; the pair is not comparable.</p></div>
+            <div className="review-copy"><span>HUMAN REVIEW STATUS</span><strong>{reviewStatus?.replaceAll("_", " ")}</strong><p>First confirm the expected answer. Then state whether your edit was intended to preserve the decision or deliberately change what the correct answer should be. A flip alone is never called an error.</p></div>
             <div className="review-fields">
-              <div><label htmlFor="expected">Expected answer</label><select id="expected" value={expectedAnswer} onChange={(event) => setExpectedAnswer(event.target.value)}><option value="">Choose explicitly…</option>{comparison.snapshot.answers.map((answer) => <option key={answer}>{answer}</option>)}</select></div>
-              <fieldset><legend>Does the meaning stay the same?</legend><div className="segmented"><button type="button" aria-pressed={meaningPreserved === true} className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Yes</button><button type="button" aria-pressed={meaningPreserved === false} className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>No</button></div></fieldset>
+              <div className="expected-field"><label htmlFor="expected">Suggested expected answer</label><select id="expected" value={expectedAnswer} onChange={(event) => { setExpectedAnswer(event.target.value); setExpectedConfirmed(false); }}><option value="">Choose explicitly…</option>{comparison.snapshot.answers.map((answer) => <option key={answer}>{answer}</option>)}</select><button className={`confirm-button ${expectedConfirmed ? "confirmed" : ""}`} type="button" aria-pressed={expectedConfirmed} onClick={() => setExpectedConfirmed(true)} disabled={!expectedAnswer}>{expectedConfirmed ? "EXPECTED ANSWER CONFIRMED" : "CONFIRM EXPECTED ANSWER"}</button></div>
+              <fieldset><legend>What was this edit intended to do?</legend><div className="segmented"><button type="button" aria-pressed={meaningPreserved === true} className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Preserve decision</button><button type="button" aria-pressed={meaningPreserved === false} className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>Change decision</button></div></fieldset>
               <div><label htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled · can guide revisions</option><option value="held_out">Held-out · evaluation only</option></select></div>
-              <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || meaningPreserved == null || Boolean(busy) || comparisonSaved}>{comparisonSaved ? "CASE SAVED" : busy === "save" ? "SAVING…" : "SAVE REVIEWED CASE"}</button>
+              <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || !expectedConfirmed || meaningPreserved == null || Boolean(busy) || comparisonSaved}>{comparisonSaved ? "CASE SAVED" : busy === "save" ? "SAVING…" : "SAVE REVIEWED CASE"}</button>
               {comparisonSaved && <div className="publish-control"><label><input type="checkbox" checked={publishConsent} onChange={(event) => setPublishConsent(event.target.checked)} disabled={Boolean(publishedPath)} /><span>I understand this synthetic input pair and its measured answers will be public for 30 days.</span></label>{publishedPath ? <a href={publishedPath}>Open published result ↗</a> : <button type="button" className="text-button" onClick={publishCase} disabled={!publishConsent || busy === "publish"}>{busy === "publish" ? "Publishing…" : "Publish a share link"}</button>}</div>}
             </div>
           </div>
@@ -583,12 +644,12 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
 
         <section className="cases-stage" id="cases" aria-labelledby="cases-title">
           <div className="section-title"><span>05</span><div><p>ANONYMOUS BROWSER WORKSPACE</p><h2 id="cases-title">Saved cases</h2></div><small>{cases.length} saved · evaluation uses the first 12</small></div>
-          {cases.length ? <div className="test-matrix" role="table" aria-label="Saved decision cases"><div className="matrix-row matrix-head" role="row"><span>SET</span><span>CHALLENGE</span><span>EXPECTED</span><span>ORIGINAL</span><span>CHANGED</span><span>CLASSIFICATION</span></div>{cases.map((item) => <div className="matrix-row" role="row" key={item.id}><span><b className="set-label">{item.setKind.replace("_", " ")}</b></span><span data-label="Challenge">{KIND_LABELS[item.challengeKind]}</span><span data-label="Expected">{item.expectedAnswer}</span><span data-label="Original">{item.originalAnswer}</span><span data-label="Changed">{item.challengedAnswer}</span><span data-label="Classification"><b className={`verdict verdict-${item.status.toLowerCase().replaceAll("_", "-")}`}>{item.status.replaceAll("_", " ")}</b></span></div>)}</div> : <div className="empty-state"><strong>No reviewed cases yet.</strong><span>Run a comparison, label it, and save the first reproducible case.</span></div>}
+          {cases.length ? <div className="test-matrix" role="table" aria-label="Saved decision cases"><div className="matrix-row matrix-head" role="row"><span>SET</span><span>CHALLENGE</span><span>INTENT</span><span>EXPECTED</span><span>ORIGINAL</span><span>CHANGED</span><span>CLASSIFICATION</span></div>{cases.map((item) => <div className="matrix-row" role="row" key={item.id}><span><b className="set-label">{item.setKind.replace("_", " ")}</b></span><span data-label="Challenge">{KIND_LABELS[item.challengeKind]}</span><span data-label="Intent">{item.challengeIntent ?? (item.meaningPreserved ? "preserve" : "legacy")}</span><span data-label="Expected">{item.expectedAnswer}</span><span data-label="Original">{item.originalAnswer}</span><span data-label="Changed">{item.challengedAnswer}</span><span data-label="Classification"><b className={`verdict verdict-${item.status.toLowerCase().replaceAll("_", "-")}`}>{item.status.replaceAll("_", " ")}</b></span></div>)}</div> : <div className="empty-state"><strong>No reviewed cases yet.</strong><span>Run a comparison, label it, and save the first reproducible case.</span></div>}
           <p className="privacy-note">Held-out cases are never included in SERV revision prompts. They are used only when evaluating a candidate.</p>
         </section>
 
         <section className="revision-stage" id="revision" aria-labelledby="revision-title">
-          <div className="section-title"><span>06</span><div><p>REVISION EVALUATION</p><h2 id="revision-title">Test the next decision version</h2></div><button className="secondary-button" type="button" onClick={suggestRevision} disabled={!capabilities.canEvaluateRevisions || Boolean(busy) || !cases.some((item) => item.setKind === "labeled" && item.meaningPreserved)}>{busy === "suggest" ? "SUGGESTING…" : "ASK SERV FOR A CANDIDATE"}</button></div>
+          <div className="section-title"><span>06</span><div><p>REVISION EVALUATION</p><h2 id="revision-title">Test the next decision version</h2></div><button className="secondary-button" type="button" onClick={suggestRevision} disabled={!capabilities.canEvaluateRevisions || Boolean(busy) || !cases.some((item) => item.setKind === "labeled" && (item.challengeIntent || item.meaningPreserved))}>{busy === "suggest" ? "SUGGESTING…" : "ASK SERV FOR A CANDIDATE"}</button></div>
           <p className="revision-note">A SERV suggestion is only a candidate. Choiceproof reruns the first 12 saved cases, including the held-out set, and shows every measured regression.</p>
           <div className="version-comparison">
             <article><header><span>BASELINE</span><b>V{version?.versionNumber ?? 1}</b></header><p>{version?.question ?? question}</p><ul>{(version?.answers ?? answers).map((answer) => <li key={answer}>{answer}</li>)}</ul></article>

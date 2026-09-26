@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (!stored.cases.length) {
       return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "NO_CASES", message: "Save labeled or held-out cases before evaluating a revision." } }, { status: 400 }), owner);
     }
-    const comparableCount = stored.cases.slice(0, 12).filter((item) => item.meaningPreserved).length;
+    const comparableCount = stored.cases.slice(0, 12).filter((item) => revisionCaseDisposition(item.meaningPreserved, item.challengeIntent) === "READY").length;
     await enforceRunBudget(request, owner.hash, Math.max(1, comparableCount * 2));
     const candidateStored = await ensureNodeVersion({
       ownerHash: owner.hash,
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     const results: Array<Record<string, unknown>> = [];
     for (const testCase of stored.cases.slice(0, 12)) {
-      if (revisionCaseDisposition(testCase.meaningPreserved) === "NOT_COMPARABLE") {
+      if (revisionCaseDisposition(testCase.meaningPreserved, testCase.challengeIntent) === "NOT_COMPARABLE") {
         results.push({
           caseId: testCase.id,
           setKind: testCase.setKind,

@@ -67,8 +67,19 @@ export type PersistedCase = {
   challengedAnswer: string;
   expectedAnswer: string;
   meaningPreserved: boolean;
+  challengeIntent: "preserve" | "change" | null;
   status: string;
   createdAt: string;
+};
+
+export type JevAnalysis = {
+  status: "live";
+  observedBehavior: "held" | "flipped";
+  apparentRelevance: "apparently_irrelevant" | "decision_relevant" | "ambiguous";
+  reviewPriority: "routine" | "review" | "urgent";
+  model: string;
+  latencyMs: number;
+  raw: unknown;
 };
 
 export type DecisionVersion = {

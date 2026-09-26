@@ -39,6 +39,17 @@ describe("product run modes", () => {
     expect(capabilities.canSaveCases).toBe(false);
   });
 
+  it("does not mislabel a pending workspace check as one-off mode", () => {
+    const capabilities = resolveProductCapabilities({
+      servConfigured: true,
+      databaseConfigured: true,
+      persistenceHealth: "checking",
+    });
+    expect(capabilities.mode).toBe("initializing");
+    expect(capabilities.canRunDecision).toBe(true);
+    expect(capabilities.canRunComparison).toBe(false);
+  });
+
   it("enables the full workflow only after persistence is reachable", () => {
     expect(resolveProductCapabilities({
       servConfigured: true,

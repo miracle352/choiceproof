@@ -22,9 +22,9 @@ export async function POST(request: NextRequest) {
   try {
     await enforceRunBudget(request, owner.hash, 1);
     const stored = await getOwnedVersionAndCases(owner.hash, nodeId, versionId);
-    const labeled = stored.cases.filter((item) => item.setKind === "labeled" && item.meaningPreserved);
+    const labeled = stored.cases.filter((item) => item.setKind === "labeled" && (item.challengeIntent || item.meaningPreserved));
     if (!labeled.length) {
-      return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "NO_LABELED_CASES", message: "Save at least one meaning-preserving labeled case first." } }, { status: 400 }), owner);
+      return attachOwnerCookie(NextResponse.json({ ok: false, error: { code: "NO_LABELED_CASES", message: "Save at least one explicitly labeled case first." } }, { status: 400 }), owner);
     }
     const candidate = await suggestServRevision({
       decision: { question: stored.version.question, answers: stored.version.answers, input: labeled[0].challengeInput },
