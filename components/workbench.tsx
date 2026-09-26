@@ -288,14 +288,14 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
     if (isResponseCurrent(requestId, latestRequestId.current)) setBusy(null);
   }
 
-  function captureError(cause: unknown, fallback: string, requestId: number) {
+  function captureError(cause: unknown, fallback: string, requestId: number, affectsRun = true) {
     if (!isResponseCurrent(requestId, latestRequestId.current)) return;
     if (cause instanceof DOMException && cause.name === "AbortError") return;
     const issue = cause instanceof ApiRequestError
       ? { code: cause.code, message: cause.message }
       : { code: "REQUEST_FAILED", message: fallback };
     setError(issue);
-    setRunState("failed");
+    if (affectsRun) setRunState("failed");
   }
 
   function post<T>(url: string, body: unknown, signal: AbortSignal) {
@@ -378,7 +378,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       setChallengeKind(data.challenges[0].kind);
       setChallengeInput(data.challenges[0].input);
     } catch (cause) {
-      captureError(cause, "Challenge generation failed.", operation.requestId);
+      captureError(cause, "Challenge generation failed.", operation.requestId, false);
     } finally {
       finishOperation(operation.requestId);
     }
@@ -463,7 +463,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       setSavedComparisonKey(comparisonKey);
       setSavedCaseId(data.case.id);
     } catch (cause) {
-      captureError(cause, "The reviewed case could not be saved.", operation.requestId);
+      captureError(cause, "The reviewed case could not be saved.", operation.requestId, false);
     } finally {
       finishOperation(operation.requestId);
     }
@@ -477,7 +477,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       if (!isResponseCurrent(operation.requestId, latestRequestId.current)) return;
       setPublishedPath(data.path);
     } catch (cause) {
-      captureError(cause, "The share link could not be published.", operation.requestId);
+      captureError(cause, "The share link could not be published.", operation.requestId, false);
     } finally {
       finishOperation(operation.requestId);
     }
@@ -494,7 +494,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       setCandidateSource("serv");
       setLabelMapping({});
     } catch (cause) {
-      captureError(cause, "SERV could not suggest a revision candidate.", operation.requestId);
+      captureError(cause, "SERV could not suggest a revision candidate.", operation.requestId, false);
     } finally {
       finishOperation(operation.requestId);
     }
@@ -515,7 +515,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       if (!isResponseCurrent(operation.requestId, latestRequestId.current)) return;
       setEvaluation(data);
     } catch (cause) {
-      captureError(cause, "The revision evaluation failed.", operation.requestId);
+      captureError(cause, "The revision evaluation failed.", operation.requestId, false);
     } finally {
       finishOperation(operation.requestId);
     }
@@ -565,9 +565,9 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
                 <span className={`run-tag ${instrumentState === "sample" ? "tag-sample" : instrumentState === "failed" ? "tag-failed" : comparisonPending ? "tag-loading" : "tag-live"}`}>
                   {instrumentState === "sample" ? "SAMPLE / NO API CALL" : instrumentState === "failed" ? "FAILED" : comparisonPending ? "LOADING" : "LIVE COMPARISON"}
                 </span>
-                <span>{comparison ? KIND_LABELS[comparison.challengeKind] : "Illustrative conflicting evidence"}</span>
+                <span>{instrumentState === "failed" ? "Request did not produce a comparison" : comparison ? KIND_LABELS[comparison.challengeKind] : "Illustrative conflicting evidence"}</span>
               </div>
-              <p>{instrumentState === "sample" ? "An illustrative preview. Run it to replace every value with measured SERV data." : comparisonPending ? "The right verdict is intentionally blank until SERV returns." : comparison ? "Frozen inputs and actual bounded answers from this run." : "The latest request failed. Sample values are not substituted."}</p>
+              <p>{instrumentState === "sample" ? "An illustrative preview. Run it to replace every value with measured SERV data." : comparisonPending ? "The right verdict is intentionally blank until SERV returns." : instrumentState === "failed" ? "The latest request failed. Prior results and sample values are not substituted." : comparison ? "Frozen inputs and actual bounded answers from this run." : "No measured comparison is available."}</p>
             </header>
 
             {instrumentState === "failed" && error ? (
@@ -604,13 +604,14 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
             {humanMismatch && <div className="human-mismatch" role="status"><span aria-hidden="true">!</span> HUMAN-CONFIRMED MISMATCH</div>}
 
             <section className="jev-strip" aria-label="Jev experiment analysis" aria-live="polite">
-              <div className="jev-provenance"><span>JEV ANALYSIS</span><b>{comparison ? jevState.status === "live" ? "LIVE" : jevState.status === "loading" ? "LOADING" : jevState.status === "failed" ? "FAILED" : "UNAVAILABLE" : "SAMPLE PREVIEW"}</b></div>
-              {!comparison && <p>Unavailable until a live comparison. Jev analyzes the experiment, never the underlying refund verdict.</p>}
-              {comparison && jevState.status === "loading" && <p>Reviewing the observed hold or flip and the apparent relevance of the edit…</p>}
-              {comparison && jevState.status === "idle" && <p>Unavailable. No Jev analysis was requested for this comparison.</p>}
-              {comparison && jevState.status === "unavailable" && <p>Unavailable. {jevState.reason}</p>}
-              {comparison && jevState.status === "failed" && <p><strong>{jevState.code.replaceAll("_", " ")}</strong> {jevState.reason} <button className="inline-action" type="button" onClick={() => void requestJevAnalysis(comparison)}>Retry</button></p>}
-              {comparison && jevState.status === "live" && <dl><div><dt>Observed</dt><dd>{jevState.observedBehavior}</dd></div><div><dt>Apparent relevance</dt><dd>{jevState.apparentRelevance.replaceAll("_", " ")}</dd></div><div><dt>Review priority</dt><dd>{jevState.reviewPriority}</dd></div><div><dt>Model</dt><dd>{jevState.model}</dd></div></dl>}
+              <div className="jev-provenance"><span>JEV ANALYSIS</span><b>{instrumentState === "failed" ? "UNAVAILABLE" : comparison ? jevState.status === "live" ? "LIVE" : jevState.status === "loading" ? "LOADING" : jevState.status === "failed" ? "FAILED" : "UNAVAILABLE" : "SAMPLE PREVIEW"}</b></div>
+              {instrumentState === "failed" && <p>Unavailable for the failed request. Prior Jev analysis is not attached to this attempt.</p>}
+              {instrumentState !== "failed" && !comparison && <p>Unavailable until a live comparison. Jev analyzes the experiment, never the underlying refund verdict.</p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "loading" && <p>Reviewing the observed hold or flip and the apparent relevance of the edit…</p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "idle" && <p>Unavailable. No Jev analysis was requested for this comparison.</p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "unavailable" && <p>Unavailable. {jevState.reason}</p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "failed" && <p><strong>{jevState.code.replaceAll("_", " ")}</strong> {jevState.reason} <button className="inline-action" type="button" onClick={() => void requestJevAnalysis(comparison)}>Retry</button></p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "live" && <dl><div><dt>Observed</dt><dd>{jevState.observedBehavior}</dd></div><div><dt>Apparent relevance</dt><dd>{jevState.apparentRelevance.replaceAll("_", " ")}</dd></div><div><dt>Review priority</dt><dd>{jevState.reviewPriority}</dd></div><div><dt>Model</dt><dd>{jevState.model}</dd></div></dl>}
             </section>
 
             <div className="instrument-actions">
@@ -622,12 +623,12 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
               <summary><span>Evidence and returned data</span><small>status, latency, provider, raw JSON</small></summary>
               <div className="evidence-grid">
                 <StatusItem label="Run status" value={instrumentState === "sample" ? "SAMPLE" : runStateLabel} tone={runState === "failed" ? "error" : comparison ? "good" : "neutral"} />
-                <StatusItem label="Challenge" value={comparison ? KIND_LABELS[comparison.challengeKind] : "Illustrative"} />
-                <StatusItem label="Original latency" value={comparison ? `${comparison.original.latencyMs.toLocaleString()} ms` : "Not measured"} />
-                <StatusItem label="Challenged latency" value={comparison ? `${comparison.challenged.latencyMs.toLocaleString()} ms` : "Not measured"} />
+                <StatusItem label="Challenge" value={instrumentState === "failed" ? "Not run" : comparison ? KIND_LABELS[comparison.challengeKind] : "Illustrative"} />
+                <StatusItem label="Original latency" value={instrumentState !== "failed" && comparison ? `${comparison.original.latencyMs.toLocaleString()} ms` : "Not measured"} />
+                <StatusItem label="Challenged latency" value={instrumentState !== "failed" && comparison ? `${comparison.challenged.latencyMs.toLocaleString()} ms` : "Not measured"} />
               </div>
-              {comparison ? <div className="result-pair"><ResultCard label="ORIGINAL SERV RESULT" result={comparison.original} /><ResultCard label="CHALLENGED SERV RESULT" result={comparison.challenged} /></div> : <p className="sample-disclosure">The preview contains illustrative output only. No request ID, latency, provider, or model result is presented as live.</p>}
-              {comparison && jevState.status === "live" && <details className="raw-nested"><summary>Actual Jev returned data</summary><pre>{JSON.stringify(jevState.raw, null, 2)}</pre></details>}
+              {instrumentState === "failed" ? <p className="sample-disclosure">No verdict, latency, provider response, or Jev analysis is attached to the failed request.</p> : comparison ? <div className="result-pair"><ResultCard label="ORIGINAL SERV RESULT" result={comparison.original} /><ResultCard label="CHALLENGED SERV RESULT" result={comparison.challenged} /></div> : <p className="sample-disclosure">The preview contains illustrative output only. No request ID, latency, provider, or model result is presented as live.</p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "live" && <details className="raw-nested"><summary>Actual Jev returned data</summary><pre>{JSON.stringify(jevState.raw, null, 2)}</pre></details>}
             </details>
           </section>
 
