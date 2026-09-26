@@ -32,7 +32,7 @@ type MeasuredDecision = { result: DecisionSuccess; snapshot: DecisionSnapshot };
 type EvaluationItem = {
   caseId: string;
   setKind: "labeled" | "held_out";
-  status: "EVALUATED" | "NEEDS_RELABELING";
+  status: "EVALUATED" | "NEEDS_RELABELING" | "NOT_COMPARABLE";
   expectedAnswer?: string;
   baselineAnswer?: string;
   candidateAnswer?: string;
@@ -42,7 +42,7 @@ type EvaluationItem = {
 type EvaluationResult = {
   candidateVersion: DecisionVersion;
   results: EvaluationItem[];
-  summary: { regressions: number; needsRelabeling: number; evaluated: number };
+  summary: { regressions: number; needsRelabeling: number; notComparable: number; evaluated: number };
 };
 
 const INITIAL: DecisionRequest = {
@@ -556,7 +556,7 @@ export function Workbench({ servConfigured, databaseConfigured }: WorkbenchProps
           </div>
           {removedAnswers.length > 0 && <div className="mapping-panel"><h3>Explicit label mapping required</h3><p>Cases using a removed answer remain <strong>NEEDS RELABELING</strong> until you map it.</p>{removedAnswers.map((oldAnswer) => <label key={oldAnswer}><span>{oldAnswer}</span><select aria-label={`Map removed label ${oldAnswer}`} value={labelMapping[oldAnswer] ?? ""} onChange={(event) => setLabelMapping((current) => ({ ...current, [oldAnswer]: event.target.value || null }))}><option value="">Needs relabeling</option>{candidateAnswers.filter(Boolean).map((answer) => <option key={answer}>{answer}</option>)}</select></label>)}</div>}
           <button className="primary-button evaluate-button" type="button" onClick={evaluateRevision} disabled={!capabilities.canEvaluateRevisions || Boolean(busy) || cases.length === 0}>{busy === "evaluate" ? "RERUNNING FIRST 12 CASES…" : "RERUN FIRST 12 CASES"}<span aria-hidden="true">↗</span></button>
-          {evaluation && <div className="evaluation-report"><div className={`evaluation-summary ${evaluation.summary.regressions ? "has-regression" : "no-regression"}`}><span>MEASURED RESULT · VERSION {evaluation.candidateVersion.versionNumber}</span><strong>{evaluation.summary.regressions ? `${evaluation.summary.regressions} REGRESSION${evaluation.summary.regressions === 1 ? "" : "S"} DETECTED` : "NO REGRESSIONS IN THE EVALUATED CASES"}</strong><p>{evaluation.summary.evaluated} evaluated · {evaluation.summary.needsRelabeling} need relabeling. Passing these cases is not a universal safety guarantee.</p></div><div className="evaluation-groups">{(["labeled", "held_out"] as const).map((kind) => <section key={kind}><h3>{kind === "labeled" ? "Labeled cases" : "Held-out cases"}</h3>{evaluation.results.filter((item) => item.setKind === kind).map((item) => <article className={`evaluation-row verdict-${item.verdict?.toLowerCase() ?? "relabel"}`} key={item.caseId}><span>{item.status === "NEEDS_RELABELING" ? "NEEDS RELABELING" : item.verdict?.replaceAll("_", " ")}</span>{item.status === "EVALUATED" && <strong>{item.baselineAnswer} → {item.candidateAnswer}<small>expected {item.expectedAnswer}</small></strong>}</article>)}</section>)}</div></div>}
+          {evaluation && <div className="evaluation-report"><div className={`evaluation-summary ${evaluation.summary.regressions ? "has-regression" : "no-regression"}`}><span>MEASURED RESULT · VERSION {evaluation.candidateVersion.versionNumber}</span><strong>{evaluation.summary.regressions ? `${evaluation.summary.regressions} REGRESSION${evaluation.summary.regressions === 1 ? "" : "S"} DETECTED` : "NO REGRESSIONS IN THE EVALUATED CASES"}</strong><p>{evaluation.summary.evaluated} evaluated · {evaluation.summary.needsRelabeling} need relabeling · {evaluation.summary.notComparable} not comparable. Passing these cases is not a universal safety guarantee.</p></div><div className="evaluation-groups">{(["labeled", "held_out"] as const).map((kind) => <section key={kind}><h3>{kind === "labeled" ? "Labeled cases" : "Held-out cases"}</h3>{evaluation.results.filter((item) => item.setKind === kind).map((item) => <article className={`evaluation-row verdict-${item.verdict?.toLowerCase() ?? "relabel"}`} key={item.caseId}><span>{item.status === "NEEDS_RELABELING" ? "NEEDS RELABELING" : item.status === "NOT_COMPARABLE" ? "NOT COMPARABLE · SKIPPED" : item.verdict?.replaceAll("_", " ")}</span>{item.status === "EVALUATED" && <strong>{item.baselineAnswer} → {item.candidateAnswer}<small>expected {item.expectedAnswer}</small></strong>}</article>)}</section>)}</div></div>}
         </section>
 
         <footer><div><strong>FAULTLINE</strong><span>Bounded decision testing with OpenServ SERV Reasoning v2.</span></div><div><span>Private by default</span><span>First 12 cases per evaluation</span><span>No universal safety claims</span></div></footer>

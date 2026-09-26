@@ -9,6 +9,10 @@ export type CaseSet = "labeled" | "held_out";
 
 export type LabelMapping = Record<string, string | null | undefined>;
 
+export function revisionCaseDisposition(meaningPreserved: boolean) {
+  return meaningPreserved ? "READY" as const : "NOT_COMPARABLE" as const;
+}
+
 export type EvaluationOutcome = {
   baselineAnswer: string;
   candidateAnswer: string;

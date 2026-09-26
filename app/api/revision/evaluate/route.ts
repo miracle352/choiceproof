@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError, readJson } from "@/lib/api";
 import { validateDecisionRequest } from "@/lib/contracts";
 import { ensureNodeVersion, getOwnedVersionAndCases, saveRun } from "@/lib/db";
-import { compareVersionOutcome, mapExpectedLabel, type LabelMapping } from "@/lib/domain";
+import { compareVersionOutcome, mapExpectedLabel, revisionCaseDisposition, type LabelMapping } from "@/lib/domain";
 import { attachOwnerCookie, getOwnerIdentity } from "@/lib/owner";
 import { runServDecision } from "@/lib/serv";
 
@@ -44,6 +44,15 @@ export async function POST(request: NextRequest) {
 
     const results: Array<Record<string, unknown>> = [];
     for (const testCase of stored.cases.slice(0, 12)) {
+      if (revisionCaseDisposition(testCase.meaningPreserved) === "NOT_COMPARABLE") {
+        results.push({
+          caseId: testCase.id,
+          setKind: testCase.setKind,
+          status: "NOT_COMPARABLE",
+          expectedAnswer: testCase.expectedAnswer,
+        });
+        continue;
+      }
       const migrated = mapExpectedLabel({
         expectedAnswer: testCase.expectedAnswer,
         oldAnswers: stored.version.answers,
@@ -83,11 +92,12 @@ export async function POST(request: NextRequest) {
     }
     const regressions = results.filter((item) => item.verdict === "REGRESSION").length;
     const needsRelabeling = results.filter((item) => item.status === "NEEDS_RELABELING").length;
+    const notComparable = results.filter((item) => item.status === "NOT_COMPARABLE").length;
     return attachOwnerCookie(NextResponse.json({
       ok: true,
       candidateVersion: candidateStored.version,
       results,
-      summary: { regressions, needsRelabeling, evaluated: results.length - needsRelabeling },
+      summary: { regressions, needsRelabeling, notComparable, evaluated: results.length - needsRelabeling - notComparable },
     }), owner);
   } catch (error) {
     return attachOwnerCookie(apiError(error), owner);

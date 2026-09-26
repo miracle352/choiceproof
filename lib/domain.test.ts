@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewedCase, classifyChallengeReview, compareVersionOutcome, mapExpectedLabel } from "./domain";
+import { buildReviewedCase, classifyChallengeReview, compareVersionOutcome, mapExpectedLabel, revisionCaseDisposition } from "./domain";
 
 describe("challenge review classification", () => {
   it("treats a changed answer as review-needed until a human supplies both labels", () => {
@@ -82,6 +82,11 @@ describe("label migration", () => {
 });
 
 describe("revision evaluation", () => {
+  it("skips reviewer-marked non-comparable cases instead of crediting a pass or failure", () => {
+    expect(revisionCaseDisposition(false)).toBe("NOT_COMPARABLE");
+    expect(revisionCaseDisposition(true)).toBe("READY");
+  });
+
   it("reports a repair that improves one case but regresses another", () => {
     const repaired = compareVersionOutcome({
       baselineAnswer: "Decline",
