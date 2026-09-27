@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginJevAttempt, failJevAttempt, settleJevAttempt, type JevUiState } from "./jev-ui";
+import { beginJevAttempt, failJevAttempt, jevUiLabel, settleJevAttempt, type JevUiState } from "./jev-ui";
 
 const priorLive: JevUiState = {
   status: "live",
@@ -28,5 +28,12 @@ describe("Jev UI attempt isolation", () => {
   it("rejects a late response from an earlier comparison", () => {
     expect(settleJevAttempt(1, 2, priorLive)).toBeNull();
     expect(failJevAttempt(1, 2, { code: "JEV_UNREACHABLE", reason: "Unavailable." })).toBeNull();
+  });
+
+  it("labels failed analysis as unavailable while preserving loading and live states", () => {
+    expect(jevUiLabel({ status: "failed", code: "JEV_TIMEOUT", reason: "Timed out." })).toBe("UNAVAILABLE");
+    expect(jevUiLabel({ status: "unavailable", reason: "Not configured." })).toBe("UNAVAILABLE");
+    expect(jevUiLabel({ status: "loading" })).toBe("LOADING");
+    expect(jevUiLabel(priorLive)).toBe("LIVE");
   });
 });

@@ -26,3 +26,9 @@ export function failJevAttempt(
 ): JevUiState | null {
   return settleJevAttempt(attemptId, currentAttemptId, { status: "failed", ...error });
 }
+
+export function jevUiLabel(state: JevUiState) {
+  if (state.status === "live") return "LIVE";
+  if (state.status === "loading") return "LOADING";
+  return "UNAVAILABLE";
+}

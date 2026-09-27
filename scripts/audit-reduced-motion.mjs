@@ -6,6 +6,7 @@ import path from "node:path";
 
 const baseUrl = (process.argv[2] || "https://choiceproof.vercel.app").replace(/\/$/, "");
 const outputDir = path.resolve(process.argv[3] || ".artifacts/reduced-motion");
+const runPersistenceSmoke = process.argv.includes("--save-smoke");
 const chromePath = process.env.CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
 function freePort() {
@@ -140,7 +141,7 @@ const chrome = spawn(chromePath, [
   "about:blank",
 ], { stdio: "ignore", windowsHide: true });
 
-const evidence = { baseUrl, emulation: "Chrome DevTools Protocol / prefers-reduced-motion: reduce", desktop: {}, mobile: {} };
+const evidence = { baseUrl, emulation: "Chrome DevTools Protocol / prefers-reduced-motion: reduce", desktop: {}, mobile: {}, persistenceSmoke: null };
 let session;
 
 try {
@@ -213,6 +214,51 @@ try {
   })()`);
   await evaluate(session, "window.scrollTo(0, 0)");
   await screenshot(session, "chamber-live-desktop.png");
+
+  if (runPersistenceSmoke) {
+    const before = await evaluate(session, "fetch('/api/workspace', { cache: 'no-store' }).then((response) => response.json())");
+    const challengedAnswer = evidence.desktop.chamber.verdicts[1];
+    await evaluate(session, `(() => {
+      const select = document.querySelector('#expected');
+      select.value = ${JSON.stringify(challengedAnswer)};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    await waitForCondition(session, `(() => {
+      const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('CONFIRM EXPECTED ANSWER'));
+      return Boolean(button && !button.disabled);
+    })()`);
+    await evaluate(session, `(() => {
+      [...document.querySelectorAll('button')].find((item) => item.textContent.includes('CONFIRM EXPECTED ANSWER')).click();
+      [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === 'Change decision').click();
+      return true;
+    })()`);
+    await waitForCondition(session, `(() => {
+      const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('SAVE REVIEWED CASE'));
+      return Boolean(button && !button.disabled);
+    })()`);
+    await evaluate(session, `(() => {
+      [...document.querySelectorAll('button')].find((item) => item.textContent.includes('SAVE REVIEWED CASE')).click();
+      return true;
+    })()`);
+    await waitForCondition(session, `(() => document.body.textContent.includes('CASE SAVED'))()`, 25_000);
+    const saved = await evaluate(session, "fetch('/api/workspace', { cache: 'no-store' }).then((response) => response.json())");
+    const savedCase = saved.workspace.cases.find((item) => item.expectedAnswer === challengedAnswer) || saved.workspace.cases[0];
+    await screenshot(session, "chamber-saved-desktop.png");
+    await navigate(session, `${baseUrl}/chamber`);
+    await waitForCondition(session, `(() => document.body.textContent.includes('private case'))()`);
+    const reloaded = await evaluate(session, "fetch('/api/workspace', { cache: 'no-store' }).then((response) => response.json())");
+    const renderedAfterReload = await evaluate(session, `document.body.textContent.includes(${JSON.stringify(`${reloaded.workspace.cases.length} private case`)})`);
+    evidence.persistenceSmoke = {
+      workspaceInitiallyEmpty: before.workspace.cases.length === 0,
+      savedCaseId: savedCase?.id || null,
+      savedExpectedAnswer: savedCase?.expectedAnswer || null,
+      savedIntent: savedCase?.challengeIntent || null,
+      renderedAfterReload,
+      retrievedAfterReload: Boolean(savedCase && reloaded.workspace.cases.some((item) => item.id === savedCase.id)),
+      caseCountAfterReload: reloaded.workspace.cases.length,
+    };
+  }
 
   await setViewport(session, 375, 812, 1);
   await new Promise((resolve) => setTimeout(resolve, 250));

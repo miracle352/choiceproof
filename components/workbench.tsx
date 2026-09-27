@@ -17,7 +17,7 @@ import type {
 import { validateDecisionRequest } from "@/lib/contracts";
 import { classifyChallengeReview, repeatedRunDisagrees, type LabelMapping } from "@/lib/domain";
 import { REFUND_CHALLENGE, REFUND_EXAMPLE } from "@/lib/example";
-import { beginJevAttempt, failJevAttempt, settleJevAttempt, type JevUiState } from "@/lib/jev-ui";
+import { beginJevAttempt, failJevAttempt, jevUiLabel, settleJevAttempt, type JevUiState } from "@/lib/jev-ui";
 import { SplitLens } from "@/components/split-lens";
 
 type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean; jevConfigured: boolean };
@@ -575,7 +575,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
             {humanMismatch && <div className="human-mismatch" role="status"><span aria-hidden="true">!</span> HUMAN-CONFIRMED MISMATCH</div>}
 
             <section className="jev-strip" aria-label="Jev experiment analysis" aria-live="polite">
-              <div className="jev-provenance"><span>JEV ANALYSIS</span><b>{instrumentState === "failed" ? "UNAVAILABLE" : comparison ? jevState.status === "live" ? "LIVE" : jevState.status === "loading" ? "LOADING" : jevState.status === "failed" ? "FAILED" : "UNAVAILABLE" : "SAMPLE PREVIEW"}</b></div>
+              <div className="jev-provenance"><span>JEV ANALYSIS</span><b>{instrumentState === "failed" ? "UNAVAILABLE" : comparison ? jevUiLabel(jevState) : "SAMPLE PREVIEW"}</b></div>
               {instrumentState === "failed" && <p>Unavailable for the failed request. Prior Jev analysis is not attached to this attempt.</p>}
               {instrumentState !== "failed" && !comparison && <p>Unavailable until a live comparison. Jev analyzes the experiment, never the underlying refund verdict.</p>}
               {instrumentState !== "failed" && comparison && jevState.status === "loading" && <p>Reviewing the observed hold or flip and the apparent relevance of the edit.</p>}
