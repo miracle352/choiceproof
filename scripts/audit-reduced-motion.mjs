@@ -7,6 +7,7 @@ import path from "node:path";
 const baseUrl = (process.argv[2] || "https://choiceproof.vercel.app").replace(/\/$/, "");
 const outputDir = path.resolve(process.argv[3] || ".artifacts/reduced-motion");
 const runPersistenceSmoke = process.argv.includes("--save-smoke");
+const simulateJevFailure = process.argv.includes("--simulate-jev-failure");
 const chromePath = process.env.CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
 function freePort() {
@@ -151,6 +152,23 @@ try {
   session = new CdpSession(target.webSocketDebuggerUrl);
   await session.send("Page.enable");
   await session.send("Runtime.enable");
+  if (simulateJevFailure) {
+    await session.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `(() => {
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+          const url = typeof input === 'string' ? input : input?.url || '';
+          if (url.includes('/api/analysis')) {
+            return new Response(JSON.stringify({ ok: true, analysis: { status: 'failed', code: 'JEV_TIMEOUT', reason: 'Simulated timeout in an isolated browser audit.' } }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+            });
+          }
+          return nativeFetch(input, init);
+        };
+      })();`,
+    });
+  }
   await session.send("Emulation.setEmulatedMedia", {
     media: "screen",
     features: [{ name: "prefers-reduced-motion", value: "reduce" }],
@@ -207,6 +225,7 @@ try {
       runState: document.querySelector('.instrument-header .run-tag')?.textContent?.trim(),
       comparisonState: seam?.getAttribute('aria-label'),
       jevState: document.querySelector('.jev-provenance b')?.textContent?.trim(),
+      jevDetail: document.querySelector('.jev-strip')?.textContent?.replace(/\\s+/g, ' ').trim(),
       readableText: chamber?.textContent?.includes('ORIGINAL INPUT') && chamber?.textContent?.includes('CHALLENGED INPUT'),
       verdicts,
       runningAnimations: document.getAnimations().filter((item) => item.playState === 'running').length,
