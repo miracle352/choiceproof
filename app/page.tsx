@@ -1,41 +1,66 @@
 import Link from "next/link";
 import { connection } from "next/server";
+import { diffWordsWithSpace } from "diff";
 import { ComparisonPlate } from "@/components/comparison-plate";
-import { SplitLens } from "@/components/split-lens";
 import { LandingLiveExample } from "@/components/landing-live-example";
+import { OrbStory } from "@/components/orb-story";
 import { SiteFooter, SiteHeader } from "@/components/site-header";
 import { listPublishedResults } from "@/lib/db";
 import { REFUND_CHALLENGE, REFUND_EXAMPLE, REFUND_SAMPLE_ANSWERS } from "@/lib/example";
 import { isServConfigured } from "@/lib/serv";
 
+function controlledFacts(before: string, after: string) {
+  const parts = diffWordsWithSpace(before, after);
+  let original = parts.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ");
+  let changed = parts.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ");
+  const lastChange = parts.reduce((index, part, partIndex) => part.added || part.removed ? partIndex : index, -1);
+  const followingWord = parts.slice(lastChange + 1).find((part) => !part.added && !part.removed)?.value.trim().split(/\s+/)[0];
+  if (/^\d+$/.test(original) && /^\d+$/.test(changed) && followingWord) {
+    original = `${original} ${followingWord}`;
+    changed = `${changed} ${followingWord}`;
+  }
+  return { original, changed };
+}
+
 export default async function Home() {
   await connection();
-  const recorded = (await listPublishedResults(1).catch(() => []))[0] ?? null;
-  const hero = recorded?.payload;
+  const published = await listPublishedResults(12).catch(() => []);
+  const recorded = published[0] ?? null;
+  const heroRecord = published.find((item) => {
+    const fact = controlledFacts(item.payload.originalInput, item.payload.challengeInput);
+    return Boolean(fact.original && fact.changed && fact.original.length <= 32 && fact.changed.length <= 32);
+  }) ?? null;
+  const hero = heroRecord?.payload;
   const heroOriginalInput = hero?.originalInput ?? REFUND_EXAMPLE.input;
   const heroChallengeInput = hero?.challengeInput ?? REFUND_CHALLENGE;
+  const heroFacts = controlledFacts(heroOriginalInput, heroChallengeInput);
   const heroOriginalAnswer = hero?.original.selectedAnswer ?? REFUND_SAMPLE_ANSWERS.original;
   const heroChallengedAnswer = hero?.challenged.selectedAnswer ?? REFUND_SAMPLE_ANSWERS.challenged;
+  const heroProvenance = heroRecord
+    ? `${hero?.recordedAt?.challenged ? new Date(hero.recordedAt.challenged).toLocaleString() : "Timestamp unavailable"} / ${hero?.challenged.model}`
+    : "Illustrative values / no API call";
 
   return (
     <>
       <SiteHeader />
       <main id="main-content" className="landing-page">
-        <section className="landing-hero" aria-labelledby="landing-title">
+        <OrbStory
+          mode={heroRecord ? "recorded" : "sample"}
+          originalFact={heroFacts.original || "Original evidence"}
+          changedFact={heroFacts.changed || "Changed evidence"}
+          originalAnswer={heroOriginalAnswer}
+          challengedAnswer={heroChallengedAnswer}
+          provenance={heroProvenance}
+        >
           <div className="landing-copy">
-            <p className="eyebrow">THE SPLIT LENS</p>
-            <h1 id="landing-title">See where one fact <em>moves the decision.</em></h1>
-            <p className="landing-deck">Compare one controlled edit, inspect SERV&apos;s bounded answers, and preserve the human-reviewed evidence.</p>
+            <h1 id="landing-title">One sentence.<br /><em>Two decisions.</em></h1>
+            <p className="landing-deck">Change one fact. See where SERV draws the line.</p>
             <div className="landing-actions">
-              <Link className="primary-button" href="/chamber">Test a decision <span aria-hidden="true">↗</span></Link>
+              <Link className="primary-button" href="/chamber">Enter the Chamber <span aria-hidden="true">↗</span></Link>
               <Link className="quiet-link" href="/evidence">Explore the evidence</Link>
             </div>
           </div>
-          <div className="hero-orbit">
-            <SplitLens state={recorded ? "recorded" : "sample"} originalInput={heroOriginalInput} challengedInput={heroChallengeInput} originalAnswer={heroOriginalAnswer} challengedAnswer={heroChallengedAnswer} />
-            <p className="hero-provenance">{recorded ? <>RECORDED {hero?.recordedAt?.challenged ? new Date(hero.recordedAt.challenged).toLocaleString() : "timestamp unavailable"} / {hero?.challenged.model}</> : <>SAMPLE / illustrative values / no API call</>}</p>
-          </div>
-        </section>
+        </OrbStory>
 
         <section className="landing-example" id="example" aria-labelledby="example-title">
           <header className="editorial-heading">

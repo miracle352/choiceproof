@@ -8,7 +8,7 @@ export const REFUND_EXAMPLE: DecisionRequest = {
 };
 
 export const REFUND_CHALLENGE =
-  "Order #1842 arrived 12 days late. The package is opened. The refund request was submitted 4 days after arrival. Policy allows returns within 30 days.";
+  "Order #1842 arrived 12 days late. The package is unopened. The refund request was submitted 45 days after arrival. Policy allows returns within 30 days.";
 
 export const REFUND_SAMPLE_ANSWERS = {
   original: "Approve",

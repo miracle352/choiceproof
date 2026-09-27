@@ -10,9 +10,9 @@ export function SiteHeader() {
           <span>CHOICEPROOF</span>
         </Link>
         <nav className="desktop-nav" aria-label="Primary navigation">
-          <Link href="/chamber">Chamber</Link>
-          <Link href="/evidence">Evidence</Link>
           <Link href="/#how-it-works">How it works</Link>
+          <Link href="/evidence">Evidence</Link>
+          <Link href="/chamber">Chamber</Link>
         </nav>
         <Link className="header-cta" href="/chamber">Test a decision <span aria-hidden="true">↗</span></Link>
         <details className="mobile-nav">
