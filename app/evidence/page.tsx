@@ -2,6 +2,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { SiteFooter, SiteHeader } from "@/components/site-header";
 import { listPublishedResults } from "@/lib/db";
+import { diffWordsWithSpace } from "diff";
 
 export default async function EvidencePage() {
   await connection();
@@ -11,21 +12,24 @@ export default async function EvidencePage() {
       <SiteHeader />
       <main id="main-content" className="evidence-page">
         <header className="evidence-hero">
-          <p className="eyebrow">PUBLIC / OWNER-PUBLISHED</p>
-          <h1>Evidence, with a publication boundary.</h1>
-          <p>Only cases an owner deliberately published appear here. Private and held-out cases are excluded. Recorded results are preserved even when a later rerun disagrees.</p>
-          <div className="evidence-count"><strong>{evidence.length}</strong><span>active published {evidence.length === 1 ? "case" : "cases"}</span></div>
+          <p className="eyebrow">PUBLIC EVIDENCE</p>
+          <h1>A record of where decisions moved.</h1>
+          <p>Owner-published cases only. Private and held-out inputs never appear here, and every recorded result remains intact after reruns.</p>
+          <div className="evidence-count"><strong>{evidence.length}</strong><span>published {evidence.length === 1 ? "case" : "cases"}</span></div>
         </header>
         {evidence.length ? <section className="evidence-list" aria-label="Published evidence">
-          {evidence.map((item, index) => {
+          {evidence.map((item) => {
             const changed = item.payload.original.selectedAnswer !== item.payload.challenged.selectedAnswer;
+            const changes = diffWordsWithSpace(item.payload.originalInput, item.payload.challengeInput);
+            const removed = changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ");
+            const added = changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ");
             return <Link className="evidence-card" href={`/share/${item.id}`} key={item.id}>
-              <span className="evidence-index">{String(index + 1).padStart(2, "0")}</span>
-              <div><span className="run-tag tag-recorded">RECORDED</span><h2>{item.payload.question}</h2><p>{item.payload.challengeKind.replaceAll("_", " ")} · published {new Date(item.createdAt).toLocaleDateString()}</p></div>
+              <div><span className="run-tag tag-recorded">RECORDED</span><h2>{item.payload.question}</h2><p>{item.payload.challengeKind.replaceAll("_", " ")} / published {new Date(item.createdAt).toLocaleDateString()}</p></div>
+              <div className="evidence-fact"><small>ONE CHANGED FACT</small><p><del>{removed}</del><span aria-hidden="true">→</span><ins>{added}</ins></p></div>
               <div className="evidence-verdict"><span>{item.payload.original.selectedAnswer}</span><i aria-hidden="true">→</i><span>{item.payload.challenged.selectedAnswer}</span><strong className={changed ? "is-change" : "is-hold"}>{changed ? "ANSWER CHANGED" : "ANSWER HELD"}</strong></div>
             </Link>;
           })}
-        </section> : <section className="evidence-empty"><span>NO PUBLIC CASES YET</span><h2>Private evidence stays private.</h2><p>The gallery will populate only after an owner saves a non-held-out case, previews its contents, and explicitly publishes it.</p><Link className="primary-button" href="/chamber">Create a case <span aria-hidden="true">↗</span></Link></section>}
+        </section> : <section className="evidence-empty"><span>NO PUBLIC CASES YET</span><h2>Private evidence stays private.</h2><p>The index appears only after an owner previews and publishes a non-held-out case.</p><Link className="primary-button" href="/chamber">Create a case <span aria-hidden="true">↗</span></Link></section>}
       </main>
       <SiteFooter />
     </>

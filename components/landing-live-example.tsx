@@ -44,7 +44,7 @@ export function LandingLiveExample({ servConfigured }: { servConfigured: boolean
       {state.kind === "failed" && <div className="live-state state-failed" role="alert"><span>FAILED</span><strong>{state.code.replaceAll("_", " ")}</strong><p>{state.message}</p></div>}
       <div className="landing-live-action">
         <div><strong>{state.kind === "live" ? "Fresh results are shown separately above." : "Want a fresh measurement?"}</strong><span>Two new SERV requests. Existing recorded evidence is never overwritten.</span></div>
-        <button className="primary-button" type="button" onClick={runLive} disabled={!servConfigured || state.kind === "loading"}>{state.kind === "loading" ? "RUNNING…" : "Run it live"}<span aria-hidden="true">↗</span></button>
+        <button className="primary-button" type="button" onClick={runLive} disabled={!servConfigured || state.kind === "loading"}>{state.kind === "loading" ? "RUNNING" : "Run it live"}<span aria-hidden="true">↗</span></button>
       </div>
       {!servConfigured && <p className="sample-disclosure">Live runs are unavailable because SERV_API_KEY is not configured. The SAMPLE above remains illustrative.</p>}
     </section>

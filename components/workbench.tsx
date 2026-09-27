@@ -18,6 +18,7 @@ import type {
 import { validateDecisionRequest } from "@/lib/contracts";
 import { classifyChallengeReview, repeatedRunDisagrees, type LabelMapping } from "@/lib/domain";
 import { REFUND_CHALLENGE, REFUND_EXAMPLE } from "@/lib/example";
+import { SplitLens } from "@/components/split-lens";
 
 type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean; jevConfigured: boolean };
 type BusyState = "decision" | "propose" | "quick" | "compare" | "save" | "publish" | "suggest" | "evaluate" | null;
@@ -129,15 +130,16 @@ function DiffView({ before, after }: { before: string; after: string }) {
     added: total.added + (part.added ? Array.from(part.value).length : 0),
     removed: total.removed + (part.removed ? Array.from(part.value).length : 0),
   }), { added: 0, removed: 0 }), [changes]);
+  const removed = useMemo(() => changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No removed text", [changes]);
+  const added = useMemo(() => changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No added text", [changes]);
 
   return (
     <div className="diff-block">
-      <div className="diff-heading"><span>Exact input difference</span><strong>+{edit.added} / −{edit.removed} characters</strong></div>
-      <div className="diff-text" aria-label={`Exact text diff with ${edit.added} added and ${edit.removed} removed characters`}>
-        {changes.map((part: Change, index: number) => (
-          <span className={part.added ? "diff-add" : part.removed ? "diff-remove" : undefined} key={index}>{part.value}</span>
-        ))}
-      </div>
+      <div className="diff-heading"><span>One changed fact</span><strong>+{edit.added} / -{edit.removed} characters</strong></div>
+      <div className="fact-change"><del>{removed}</del><i aria-hidden="true">→</i><ins>{added}</ins></div>
+      <details className="exact-diff"><summary>Read exact full-text diff</summary><div className="diff-text" aria-label={`Exact text diff with ${edit.added} added and ${edit.removed} removed characters`}>
+        {changes.map((part: Change, index: number) => <span className={part.added ? "diff-add" : part.removed ? "diff-remove" : undefined} key={index}>{part.value}</span>)}
+      </div></details>
     </div>
   );
 }
@@ -545,9 +547,9 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
       <main id="main-content" className="chamber-page-main">
         <section className="chamber-hero" id="workbench" aria-labelledby="page-title" aria-busy={Boolean(busy)}>
           <div className="chamber-intro">
-            <p className="eyebrow">THE DECISION CHAMBER / OPENServ SERV REASONING</p>
-            <h1 id="page-title">How much can one sentence change an AI decision?</h1>
-            <p>Run one bounded decision twice, inspect the exact edit, then decide what the change means.</p>
+            <p className="eyebrow">DECISION CHAMBER</p>
+            <h1 id="page-title">Test a bounded decision.</h1>
+            <p>Change one fact, compare both SERV answers, then label what should have happened.</p>
           </div>
 
           <section className={`decision-chamber state-${instrumentState}`} aria-labelledby="instrument-title" aria-live="polite">
@@ -566,29 +568,13 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
                 <span>FAILED</span><div><strong>{error.code.replaceAll("_", " ")}</strong><p>{error.message}</p></div>
               </div>
             ) : (
-              <div className="chamber-grid" key={comparisonKey ?? instrumentState}>
-                <article className="verdict-pane original-pane">
-                  <div className="pane-label"><span>ORIGINAL INPUT</span><small>{instrumentState === "sample" ? "SAMPLE" : comparisonPending ? "SUBMITTED" : "MEASURED"}</small></div>
-                  <p>{instrumentState === "sample" ? INITIAL.input : comparisonPending ? originalInput : instrumentOriginalInput}</p>
-                  <div className="bounded-verdict"><small>SERV BOUNDED ANSWER</small><strong>{comparisonPending ? "Pending" : instrumentOriginalResult.selectedAnswer}</strong></div>
-                </article>
-
-                <div className="boundary-seam" aria-label={instrumentState === "changed" ? "The measured answer changed" : instrumentState === "held" ? "The measured answer held" : "Decision boundary preview"}>
-                  <span className="seam-line" aria-hidden="true" />
-                  <div className="seam-copy">
-                    <small>EXACT EDIT</small>
-                    <DiffView before={instrumentState === "sample" ? INITIAL.input : comparisonPending ? originalInput : instrumentOriginalInput} after={instrumentState === "sample" ? SAMPLE_CHALLENGE_INPUT : comparisonPending ? challengeInput : instrumentChallengeInput} />
-                    {instrumentState === "changed" && <strong className="change-signal">ANSWER CHANGED</strong>}
-                    {instrumentState === "held" && <strong className="hold-signal">ANSWER HELD</strong>}
-                    {instrumentState === "loading" && <strong className="wait-signal">WAITING FOR SERV</strong>}
-                  </div>
+              <div key={comparisonKey ?? instrumentState}>
+                <SplitLens compact state={instrumentState} originalInput={instrumentState === "sample" ? INITIAL.input : comparisonPending ? originalInput : instrumentOriginalInput} challengedInput={instrumentState === "sample" ? SAMPLE_CHALLENGE_INPUT : comparisonPending ? challengeInput : instrumentChallengeInput} originalAnswer={comparisonPending ? "Pending" : instrumentOriginalResult.selectedAnswer} challengedAnswer={comparisonPending ? undefined : instrumentChallengedResult.selectedAnswer} />
+                <div className="chamber-grid">
+                  <article className="verdict-pane original-pane"><div className="pane-label"><span>ORIGINAL INPUT</span><small>{instrumentState === "sample" ? "SAMPLE" : comparisonPending ? "SUBMITTED" : "MEASURED"}</small></div><p>{instrumentState === "sample" ? INITIAL.input : comparisonPending ? originalInput : instrumentOriginalInput}</p></article>
+                  <div className="boundary-seam" aria-label={instrumentState === "changed" ? "The measured answer changed" : instrumentState === "held" ? "The measured answer held" : "Decision boundary preview"}><div className="seam-copy"><DiffView before={instrumentState === "sample" ? INITIAL.input : comparisonPending ? originalInput : instrumentOriginalInput} after={instrumentState === "sample" ? SAMPLE_CHALLENGE_INPUT : comparisonPending ? challengeInput : instrumentChallengeInput} />{instrumentState === "changed" && <strong className="change-signal">ANSWER CHANGED</strong>}{instrumentState === "held" && <strong className="hold-signal">ANSWER HELD</strong>}{instrumentState === "loading" && <strong className="wait-signal">WAITING FOR SERV</strong>}</div></div>
+                  <article className="verdict-pane challenged-pane"><div className="pane-label"><span>CHALLENGED INPUT</span><small>{instrumentState === "sample" ? "SAMPLE" : comparisonPending ? "SUBMITTED" : "MEASURED"}</small></div><p>{instrumentState === "sample" ? SAMPLE_CHALLENGE_INPUT : comparisonPending ? challengeInput : instrumentChallengeInput}</p></article>
                 </div>
-
-                <article className="verdict-pane challenged-pane">
-                  <div className="pane-label"><span>CHALLENGED INPUT</span><small>{instrumentState === "sample" ? "SAMPLE" : comparisonPending ? "SUBMITTED" : "MEASURED"}</small></div>
-                  <p>{instrumentState === "sample" ? SAMPLE_CHALLENGE_INPUT : comparisonPending ? challengeInput : instrumentChallengeInput}</p>
-                  <div className="bounded-verdict"><small>SERV BOUNDED ANSWER</small><strong>{comparisonPending ? "Waiting…" : instrumentChallengedResult.selectedAnswer}</strong></div>
-                </article>
               </div>
             )}
 
@@ -598,7 +584,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
               <div className="jev-provenance"><span>JEV ANALYSIS</span><b>{instrumentState === "failed" ? "UNAVAILABLE" : comparison ? jevState.status === "live" ? "LIVE" : jevState.status === "loading" ? "LOADING" : jevState.status === "failed" ? "FAILED" : "UNAVAILABLE" : "SAMPLE PREVIEW"}</b></div>
               {instrumentState === "failed" && <p>Unavailable for the failed request. Prior Jev analysis is not attached to this attempt.</p>}
               {instrumentState !== "failed" && !comparison && <p>Unavailable until a live comparison. Jev analyzes the experiment, never the underlying refund verdict.</p>}
-              {instrumentState !== "failed" && comparison && jevState.status === "loading" && <p>Reviewing the observed hold or flip and the apparent relevance of the edit…</p>}
+              {instrumentState !== "failed" && comparison && jevState.status === "loading" && <p>Reviewing the observed hold or flip and the apparent relevance of the edit.</p>}
               {instrumentState !== "failed" && comparison && jevState.status === "idle" && <p>Unavailable. No Jev analysis was requested for this comparison.</p>}
               {instrumentState !== "failed" && comparison && jevState.status === "unavailable" && <p>Unavailable. {jevState.reason}</p>}
               {instrumentState !== "failed" && comparison && jevState.status === "failed" && <p><strong>{jevState.code.replaceAll("_", " ")}</strong> {jevState.reason} <button className="inline-action" type="button" onClick={() => void requestJevAnalysis(comparison)}>Retry</button></p>}
@@ -623,12 +609,15 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
             </details>
           </section>
 
-          <section className="system-strip" aria-label="Configuration and service status">
+          <details className="system-strip" aria-label="Configuration and service status">
+            <summary>Service diagnostics</summary>
+            <div>
             <StatusItem label="SERV configuration" value={servConfigured ? "Configured" : "Missing"} tone={servConfigured ? "neutral" : "warning"} />
             <StatusItem label="Workspace configuration" value={databaseConfigured ? "Configured" : "Not configured"} />
             <StatusItem label="Workspace health" value={persistenceHealth === "checking" ? "LOADING" : persistenceHealth.replaceAll("_", " ")} tone={persistenceHealth === "available" ? "good" : persistenceHealth === "failed" ? "error" : "neutral"} />
             <StatusItem label="Jev configuration" value={jevConfigured ? "Configured" : "Unavailable"} tone={jevConfigured ? "neutral" : "warning"} />
-          </section>
+            </div>
+          </details>
         </section>
 
         {!servConfigured && <aside className="mode-notice notice-sample" role="status"><strong>SAMPLE MODE / READ ONLY</strong><p>No SERV key is configured. Every result above is illustrative and no API request occurred.</p></aside>}
@@ -668,7 +657,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
 
         <section className="challenge-stage" aria-labelledby="challenge-title">
           <div className="section-heading"><div><p>CONTROLLED CHALLENGE</p><h2 id="challenge-title">Change one thing</h2></div><small>{capabilities.canRunComparison ? "Persistence ready" : "Healthy persistence required"}</small></div>
-          <div className="challenge-intro"><p>Ask SERV for five varied inputs, choose one, or write your own. An answer change is a finding for review, not automatically an error.</p><button className="secondary-button" type="button" onClick={generateChallenges} disabled={!capabilities.canGenerateChallenges || Boolean(busy)}>{busy === "propose" ? "GENERATING…" : "GENERATE CHALLENGE IDEAS"}</button></div>
+          <div className="challenge-intro"><p>Ask SERV for five varied inputs, choose one, or write your own. An answer change is a finding for review, not automatically an error.</p><button className="secondary-button" type="button" onClick={generateChallenges} disabled={!capabilities.canGenerateChallenges || Boolean(busy)}>{busy === "propose" ? "GENERATING" : "GENERATE CHALLENGE IDEAS"}</button></div>
           <div className="challenge-types" aria-label="Challenge type guide">
             {(Object.keys(KIND_HELP) as ChallengeKind[]).filter((kind) => kind !== "manual").map((kind) => <div key={kind}><strong>{KIND_LABELS[kind]}</strong><span>{KIND_HELP[kind]}</span></div>)}
           </div>
@@ -687,10 +676,10 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
           <div className="review-block">
             <div className="review-copy"><span>REVIEW STATUS</span><strong>{reviewStatus?.replaceAll("_", " ")}</strong><p>Confirm the expected answer, then say whether the edit was meant to keep or change the correct decision. A flip alone is never called an error.</p></div>
             <div className="review-fields">
-              <div className="expected-field"><label htmlFor="expected">Suggested expected answer</label><select id="expected" value={expectedAnswer} onChange={(event) => { setExpectedAnswer(event.target.value); setExpectedConfirmed(false); }}><option value="">Choose explicitly…</option>{comparison.snapshot.answers.map((answer) => <option key={answer}>{answer}</option>)}</select><button className={`confirm-button ${expectedConfirmed ? "confirmed" : ""}`} type="button" aria-pressed={expectedConfirmed} onClick={() => setExpectedConfirmed(true)} disabled={!expectedAnswer}>{expectedConfirmed ? "EXPECTED ANSWER CONFIRMED" : "CONFIRM EXPECTED ANSWER"}</button></div>
+              <div className="expected-field"><label htmlFor="expected">Suggested expected answer</label><select id="expected" value={expectedAnswer} onChange={(event) => { setExpectedAnswer(event.target.value); setExpectedConfirmed(false); }}><option value="">Choose explicitly</option>{comparison.snapshot.answers.map((answer) => <option key={answer}>{answer}</option>)}</select><button className={`confirm-button ${expectedConfirmed ? "confirmed" : ""}`} type="button" aria-pressed={expectedConfirmed} onClick={() => setExpectedConfirmed(true)} disabled={!expectedAnswer}>{expectedConfirmed ? "EXPECTED ANSWER CONFIRMED" : "CONFIRM EXPECTED ANSWER"}</button></div>
               <fieldset><legend>What was this edit intended to do?</legend><div className="segmented"><button type="button" aria-pressed={meaningPreserved === true} className={meaningPreserved === true ? "active" : ""} onClick={() => setMeaningPreserved(true)}>Preserve decision</button><button type="button" aria-pressed={meaningPreserved === false} className={meaningPreserved === false ? "active" : ""} onClick={() => setMeaningPreserved(false)}>Change decision</button></div></fieldset>
-              <div><label htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled · can guide revisions</option><option value="held_out">Held-out · evaluation only</option></select></div>
-              <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || !expectedConfirmed || meaningPreserved == null || Boolean(busy) || comparisonSaved}>{comparisonSaved ? "CASE SAVED" : busy === "save" ? "SAVING…" : "SAVE REVIEWED CASE"}</button>
+              <div><label htmlFor="case-set">Test set</label><select id="case-set" value={setKind} onChange={(event) => setSetKind(event.target.value as "labeled" | "held_out")}><option value="labeled">Labeled / can guide revisions</option><option value="held_out">Held-out / evaluation only</option></select></div>
+              <button className="save-button" type="button" onClick={saveLabeledCase} disabled={!expectedAnswer || !expectedConfirmed || meaningPreserved == null || Boolean(busy) || comparisonSaved}>{comparisonSaved ? "CASE SAVED" : busy === "save" ? "SAVING" : "SAVE REVIEWED CASE"}</button>
               {comparisonSaved && savedCaseSet === "held_out" && <div className="publish-control"><strong>HELD-OUT / PRIVATE</strong><p>Held-out cases cannot be published. They remain available only to this anonymous workspace for revision evaluation.</p></div>}
               {comparisonSaved && savedCaseSet === "labeled" && <div className="publish-control"><details><summary>Preview what becomes public</summary><div className="publish-preview"><p><strong>Question:</strong> {comparison.snapshot.question}</p><p><strong>Allowed answers:</strong> {comparison.snapshot.answers.join(" · ")}</p><p><strong>Original input:</strong> {comparison.snapshot.originalInput}</p><p><strong>Changed input:</strong> {comparison.snapshot.challengeInput}</p><p><strong>Recorded answers:</strong> {comparison.original.selectedAnswer} → {comparison.challenged.selectedAnswer}</p><p><strong>Models:</strong> {comparison.original.model} / {comparison.challenged.model}</p><p><strong>Providers:</strong> {comparison.original.provider ?? "not returned"} / {comparison.challenged.provider ?? "not returned"}</p><p><strong>Human label:</strong> Expected {expectedAnswer}; intent {meaningPreserved ? "preserve" : "change"}.</p><p><strong>Jev:</strong> {jevState.status === "live" ? `${jevState.observedBehavior}, ${jevState.apparentRelevance.replaceAll("_", " ")}, ${jevState.reviewPriority}` : "Unavailable"}</p><p>Recorded timestamps are included. Raw provider JSON and workspace ownership are excluded. The link expires in 30 days.</p></div></details><label><input type="checkbox" checked={publishConsent} onChange={(event) => setPublishConsent(event.target.checked)} disabled={Boolean(publishedPath)} /><span>I reviewed this synthetic or consented case and choose to make the previewed data public for 30 days.</span></label>{publishedPath ? <a href={publishedPath}>Open published result ↗</a> : <button type="button" className="text-button" onClick={publishCase} disabled={!publishConsent || busy === "publish"}>{busy === "publish" ? "Publishing…" : "Publish this case"}</button>}</div>}
             </div>
