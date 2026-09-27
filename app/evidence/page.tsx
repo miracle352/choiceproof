@@ -25,7 +25,7 @@ export default async function EvidencePage() {
             const added = changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text added";
             return <Link className="evidence-card" href={`/share/${item.id}`} key={item.id}>
               <div><span className="run-tag tag-recorded">RECORDED</span><h2>{item.payload.question}</h2><p>{item.payload.challengeKind.replaceAll("_", " ")} / published {new Date(item.createdAt).toLocaleDateString()}</p></div>
-              <div className="evidence-fact"><small>ONE CHANGED FACT</small><p><del>{removed}</del><span aria-hidden="true">→</span><ins>{added}</ins></p></div>
+              <div className="evidence-fact"><small>EXACT RECORDED EDIT</small><p><del>{removed}</del><span aria-hidden="true">→</span><ins>{added}</ins></p></div>
               <div className="evidence-verdict"><span>{item.payload.original.selectedAnswer}</span><i aria-hidden="true">→</i><span>{item.payload.challenged.selectedAnswer}</span><strong className={changed ? "is-change" : "is-hold"}>{changed ? "ANSWER CHANGED" : "ANSWER HELD"}</strong></div>
             </Link>;
           })}

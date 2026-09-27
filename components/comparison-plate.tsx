@@ -29,7 +29,7 @@ export function ComparisonPlate(props: ComparisonPlateProps) {
       <div className="public-comparison-grid">
         <section className="public-verdict public-verdict-original"><span>ORIGINAL SERV ANSWER</span><strong>{props.originalAnswer}</strong>{props.models && <em>{props.models.original}</em>}</section>
         <div className="public-seam">
-          <span>ONE CHANGED FACT / {editSize} EDITED CHARACTERS</span>
+          <span>EXACT INPUT EDIT / {editSize} EDITED CHARACTERS</span>
           <div className="fact-change"><del>{removed}</del><i aria-hidden="true">→</i><ins>{added}</ins></div>
           <strong>{changed ? "ANSWER CHANGED" : "ANSWER HELD"}</strong>
           {props.challengeKind && <small>{props.challengeKind.replaceAll("_", " ")}</small>}
