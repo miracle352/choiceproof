@@ -4,6 +4,7 @@ import { PublicRerun } from "@/components/public-rerun";
 import { SiteFooter, SiteHeader } from "@/components/site-header";
 import { ComparisonPlate } from "@/components/comparison-plate";
 import { SplitLens } from "@/components/split-lens";
+import { ArrowLeftIcon } from "@/components/icons";
 import { getPublishedResult } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export default async function SharedResult({ params }: { params: Promise<{ id: s
   if (!result) notFound();
   const item = result.payload;
   return <><SiteHeader /><main id="main-content" className="share-page">
-    <header className="share-header"><Link href="/evidence">← Public evidence</Link><span>Published {new Date(result.createdAt).toLocaleString()} / expires {new Date(result.expiresAt).toLocaleDateString()}</span></header>
+    <header className="share-header"><Link href="/evidence"><ArrowLeftIcon /> Public evidence</Link><span>Published {new Date(result.createdAt).toLocaleString()} / expires {new Date(result.expiresAt).toLocaleDateString()}</span></header>
     <article className="share-sheet">
       <p className="eyebrow">OWNER-PUBLISHED CASE</p><h1>{item.question}</h1>
       <p className="share-choice-list">Allowed answers: {item.answers.join(" / ")}</p>

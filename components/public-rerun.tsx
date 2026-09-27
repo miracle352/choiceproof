@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DecisionSuccess } from "@/lib/contracts";
 import type { PublicComparison } from "@/lib/public-evidence";
 import { ComparisonPlate } from "@/components/comparison-plate";
+import { ArrowUpRightIcon } from "@/components/icons";
 
 type RerunState = { kind: "idle" | "loading" } | { kind: "failed"; code: string; message: string } | { kind: "live"; original: DecisionSuccess; challenged: DecisionSuccess };
 
@@ -31,6 +32,6 @@ export function PublicRerun({ payload }: { payload: PublicComparison }) {
     <header><div><p className="eyebrow">REPRODUCE</p><h2>Rerun these exact inputs</h2></div><p>Fresh SERV outputs appear separately. The recorded evidence above is never overwritten.</p></header>
     {state.kind === "live" && <ComparisonPlate label="LIVE" question={payload.question} answers={payload.answers} originalInput={payload.originalInput} challengeInput={payload.challengeInput} originalAnswer={state.original.selectedAnswer} challengedAnswer={state.challenged.selectedAnswer} models={{ original: state.original.model, challenged: state.challenged.model }} challengeKind={payload.challengeKind} />}
     {state.kind === "failed" && <div className="live-state state-failed" role="alert"><span>FAILED</span><strong>{state.code.replaceAll("_", " ")}</strong><p>{state.message}</p></div>}
-    <button className="primary-button" type="button" onClick={rerun} disabled={state.kind === "loading"}>{state.kind === "loading" ? "RUNNING TWO REQUESTS…" : "Rerun these inputs"}<span aria-hidden="true">↗</span></button>
+    <button className="primary-button" type="button" onClick={rerun} disabled={state.kind === "loading"}>{state.kind === "loading" ? "RUNNING TWO REQUESTS…" : "Rerun these inputs"}<ArrowUpRightIcon /></button>
   </section>;
 }

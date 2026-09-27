@@ -6,7 +6,8 @@ import path from "node:path";
 
 const baseUrl = (process.argv[2] || "https://choiceproof.vercel.app").replace(/\/$/, "");
 const outputDir = path.resolve(process.argv[3] || ".artifacts/reduced-motion");
-const runPersistenceSmoke = process.argv.includes("--save-smoke");
+const runFullSubmission = process.argv.includes("--full-submission");
+const runPersistenceSmoke = process.argv.includes("--save-smoke") || runFullSubmission;
 const simulateJevFailure = process.argv.includes("--simulate-jev-failure");
 const chromePath = process.env.CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
@@ -277,6 +278,87 @@ try {
       retrievedAfterReload: Boolean(savedCase && reloaded.workspace.cases.some((item) => item.id === savedCase.id)),
       caseCountAfterReload: reloaded.workspace.cases.length,
     };
+
+    if (runFullSubmission) {
+      const heldOutInput = "Order #1842 arrived 12 days late. The package is unopened. The refund request was submitted 4 days after arrival. Policy allows returns within 30 days. A synthetic account note says the package was opened before return.";
+      await evaluate(session, `(() => {
+        const textarea = document.querySelector('#challenge-input');
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(textarea, ${JSON.stringify("Order #1842 arrived 12 days late. The package is unopened. The refund request was submitted 4 days after arrival. Policy allows returns within 30 days. A synthetic account note says the package was opened before return.")});
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => {
+        const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('RUN THIS COMPARISON'));
+        return Boolean(button && !button.disabled);
+      })()`);
+      await evaluate(session, `(() => {
+        [...document.querySelectorAll('button')].find((item) => item.textContent.includes('RUN THIS COMPARISON')).click();
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => {
+        const text = document.querySelector('.decision-chamber')?.textContent || '';
+        return text.includes('LIVE COMPARISON') && (text.includes('ANSWER CHANGED') || text.includes('ANSWER HELD'));
+      })()`, 45_000);
+      const heldOutAnswer = await evaluate(session, `[...document.querySelectorAll('.result-card header strong')].map((item) => item.textContent.trim())[1]`);
+      await evaluate(session, `(() => {
+        const expected = document.querySelector('#expected');
+        expected.value = ${JSON.stringify(heldOutAnswer)};
+        expected.dispatchEvent(new Event('change', { bubbles: true }));
+        const set = document.querySelector('#case-set');
+        set.value = 'held_out';
+        set.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => {
+        const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('CONFIRM EXPECTED ANSWER'));
+        return Boolean(button && !button.disabled);
+      })()`);
+      await evaluate(session, `(() => {
+        [...document.querySelectorAll('button')].find((item) => item.textContent.includes('CONFIRM EXPECTED ANSWER')).click();
+        [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === 'Change decision').click();
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => {
+        const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('SAVE REVIEWED CASE'));
+        return Boolean(button && !button.disabled);
+      })()`);
+      await evaluate(session, `(() => {
+        [...document.querySelectorAll('button')].find((item) => item.textContent.includes('SAVE REVIEWED CASE')).click();
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => document.body.textContent.includes('HELD-OUT / PRIVATE'))()`, 25_000);
+      const withHeldOut = await evaluate(session, "fetch('/api/workspace', { cache: 'no-store' }).then((response) => response.json())");
+      const heldOutCase = withHeldOut.workspace.cases.find((item) => item.setKind === 'held_out' && item.challengeInput === heldOutInput);
+      await evaluate(session, `(() => {
+        [...document.querySelectorAll('button')].find((item) => item.textContent.includes('ASK SERV FOR A CANDIDATE')).click();
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => {
+        const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('ASK SERV FOR A CANDIDATE'));
+        return Boolean(button && !button.disabled && !document.body.textContent.includes('SUGGESTING…'));
+      })()`, 45_000);
+      await evaluate(session, `(() => {
+        [...document.querySelectorAll('button')].find((item) => item.textContent.includes('RERUN FIRST 12 CASES')).click();
+        return true;
+      })()`);
+      await waitForCondition(session, `(() => Boolean(document.querySelector('.evaluation-report')))()`, 90_000);
+      const evaluation = await evaluate(session, `(() => ({
+        summary: document.querySelector('.evaluation-summary')?.textContent?.replace(/\\s+/g, ' ').trim(),
+        labeled: [...document.querySelectorAll('.evaluation-groups section')][0]?.textContent?.replace(/\\s+/g, ' ').trim(),
+        heldOut: [...document.querySelectorAll('.evaluation-groups section')][1]?.textContent?.replace(/\\s+/g, ' ').trim(),
+      }))()`);
+      const afterEvaluation = await evaluate(session, "fetch('/api/workspace', { cache: 'no-store' }).then((response) => response.json())");
+      evidence.fullSubmission = {
+        labeledCaseId: savedCase?.id || null,
+        heldOutCaseId: heldOutCase?.id || null,
+        heldOutPrivate: heldOutCase?.setKind === 'held_out',
+        heldOutSavedAfterRefresh: Boolean(heldOutCase && afterEvaluation.workspace.cases.some((item) => item.id === heldOutCase.id)),
+        caseCount: afterEvaluation.workspace.cases.length,
+        evaluation,
+      };
+      await screenshot(session, "revision-evaluation-desktop.png");
+    }
   }
 
   await setViewport(session, 375, 812, 1);

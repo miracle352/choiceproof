@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
+import { ArrowUpRightIcon } from "@/components/icons";
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -34,7 +35,7 @@ export function SiteHeader() {
           <Link href="/evidence" aria-current={isCurrent("evidence") ? "page" : undefined}>Evidence</Link>
           <Link href="/chamber" aria-current={isCurrent("chamber") ? "page" : undefined}>Chamber</Link>
         </nav>
-        <Link className="header-cta" href="/chamber">Test a decision <span aria-hidden="true">↗</span></Link>
+        <Link className="header-cta" href="/chamber">Test a decision <ArrowUpRightIcon /></Link>
         <details className="mobile-nav">
           <summary aria-label="Open navigation">Menu</summary>
           <nav aria-label="Mobile navigation">

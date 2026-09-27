@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { SiteFooter, SiteHeader } from "@/components/site-header";
+import { ArrowUpRightIcon } from "@/components/icons";
 import { listPublishedResults } from "@/lib/db";
 import { diffWordsWithSpace } from "diff";
 
@@ -29,7 +30,7 @@ export default async function EvidencePage() {
               <div className="evidence-verdict"><span>{item.payload.original.selectedAnswer}</span><i aria-hidden="true">→</i><span>{item.payload.challenged.selectedAnswer}</span><strong className={changed ? "is-change" : "is-hold"}>{changed ? "ANSWER CHANGED" : "ANSWER HELD"}</strong></div>
             </Link>;
           })}
-        </section> : <section className="evidence-empty"><span>NO PUBLIC CASES YET</span><h2>Private evidence stays private.</h2><p>The index appears only after an owner previews and publishes a non-held-out case.</p><Link className="primary-button" href="/chamber">Create a case <span aria-hidden="true">↗</span></Link></section>}
+        </section> : <section className="evidence-empty"><span>NO PUBLIC CASES YET</span><h2>Private evidence stays private.</h2><p>The index appears only after an owner previews and publishes a non-held-out case.</p><Link className="primary-button" href="/chamber">Create a case <ArrowUpRightIcon /></Link></section>}
       </main>
       <SiteFooter />
     </>

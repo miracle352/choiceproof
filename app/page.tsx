@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { ComparisonPlate } from "@/components/comparison-plate";
+import { ArrowRightIcon, ArrowUpRightIcon } from "@/components/icons";
 import { LandingLiveExample } from "@/components/landing-live-example";
 import { OrbStory } from "@/components/orb-story";
 import { SiteFooter, SiteHeader } from "@/components/site-header";
@@ -40,7 +41,7 @@ export default async function Home() {
             <h1 id="landing-title">One sentence.<br /><span>Two decisions.</span></h1>
             <p className="landing-deck">Change one fact. See where SERV draws the line.</p>
             <div className="landing-actions">
-              <Link className="primary-button" href="/chamber">Enter the Chamber <span aria-hidden="true">↗</span></Link>
+              <Link className="primary-button" href="/chamber">Enter the Chamber <ArrowUpRightIcon /></Link>
               <Link className="quiet-link" href="/evidence">Explore the evidence</Link>
             </div>
           </div>
@@ -58,7 +59,7 @@ export default async function Home() {
             <ComparisonPlate label="SAMPLE" question={REFUND_EXAMPLE.question} answers={REFUND_EXAMPLE.answers} originalInput={REFUND_EXAMPLE.input} challengeInput={REFUND_CHALLENGE} originalAnswer={REFUND_SAMPLE_ANSWERS.original} challengedAnswer={REFUND_SAMPLE_ANSWERS.challenged} challengeKind="one controlled fact" />
           )}
           <LandingLiveExample servConfigured={isServConfigured()} />
-          {recorded && <Link className="evidence-detail-link" href={`/share/${recorded.id}`}>Open the complete recorded case <span aria-hidden="true">→</span></Link>}
+          {recorded && <Link className="evidence-detail-link" href={`/share/${recorded.id}`}>Open the complete recorded case <ArrowRightIcon /></Link>}
         </section>
 
         <section className="how-it-works" id="how-it-works" aria-labelledby="how-title">
@@ -71,7 +72,7 @@ export default async function Home() {
           </ol>
         </section>
 
-        <section className="landing-close"><p className="eyebrow">PRIVATE BY DEFAULT</p><h2>Test a boundary in under a minute. Keep the cases that matter.</h2><Link className="primary-button" href="/chamber">Test a decision <span aria-hidden="true">↗</span></Link></section>
+        <section className="landing-close"><p className="eyebrow">PRIVATE BY DEFAULT</p><h2>Test a boundary in under a minute. Keep the cases that matter.</h2><Link className="primary-button" href="/chamber">Test a decision <ArrowUpRightIcon /></Link></section>
       </main>
       <SiteFooter />
     </>

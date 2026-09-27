@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { DecisionSuccess } from "@/lib/contracts";
 import { REFUND_CHALLENGE, REFUND_EXAMPLE } from "@/lib/example";
 import { ComparisonPlate } from "@/components/comparison-plate";
+import { ArrowUpRightIcon } from "@/components/icons";
 
 type State = { kind: "idle" } | { kind: "loading" } | { kind: "failed"; code: string; message: string } | { kind: "live"; original: DecisionSuccess; challenged: DecisionSuccess };
 
@@ -44,7 +45,7 @@ export function LandingLiveExample({ servConfigured }: { servConfigured: boolean
       {state.kind === "failed" && <div className="live-state state-failed" role="alert"><span>FAILED</span><strong>{state.code.replaceAll("_", " ")}</strong><p>{state.message}</p></div>}
       <div className="landing-live-action">
         <div><strong>{state.kind === "live" ? "Fresh results are shown separately above." : "Want a fresh measurement?"}</strong><span>Two new SERV requests. Existing recorded evidence is never overwritten.</span></div>
-        <button className="primary-button" type="button" onClick={runLive} disabled={!servConfigured || state.kind === "loading"}>{state.kind === "loading" ? "RUNNING" : "Run it live"}<span aria-hidden="true">↗</span></button>
+        <button className="primary-button" type="button" onClick={runLive} disabled={!servConfigured || state.kind === "loading"}>{state.kind === "loading" ? "RUNNING" : "Run it live"}<ArrowUpRightIcon /></button>
       </div>
       {!servConfigured && <p className="sample-disclosure">Live runs are unavailable because SERV_API_KEY is not configured. The SAMPLE above remains illustrative.</p>}
     </section>
