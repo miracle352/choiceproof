@@ -12,12 +12,12 @@ import type {
   DecisionSuccess,
   DecisionVersion,
   PersistedCase,
-  JevAnalysis,
   WorkspaceSnapshot,
 } from "@/lib/contracts";
 import { validateDecisionRequest } from "@/lib/contracts";
 import { classifyChallengeReview, repeatedRunDisagrees, type LabelMapping } from "@/lib/domain";
 import { REFUND_CHALLENGE, REFUND_EXAMPLE } from "@/lib/example";
+import { beginJevAttempt, failJevAttempt, settleJevAttempt, type JevUiState } from "@/lib/jev-ui";
 import { SplitLens } from "@/components/split-lens";
 
 type WorkbenchProps = { servConfigured: boolean; databaseConfigured: boolean; jevConfigured: boolean };
@@ -25,13 +25,6 @@ type BusyState = "decision" | "propose" | "quick" | "compare" | "save" | "publis
 type RunState = "sample" | "not_tested" | "running" | "live" | "failed";
 type OperationError = { code: string; message: string };
 type MeasuredDecision = { result: DecisionSuccess; snapshot: DecisionSnapshot };
-type JevUiState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "unavailable"; reason: string }
-  | { status: "failed"; code: string; reason: string }
-  | JevAnalysis;
-
 type EvaluationItem = {
   caseId: string;
   setKind: "labeled" | "held_out";
@@ -310,7 +303,7 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
     const controller = new AbortController();
     jevController.current = controller;
     const requestId = ++jevRequestId.current;
-    setJevState({ status: "loading" });
+    setJevState(beginJevAttempt());
     try {
       const data = await post<{ ok: true; analysis: JevUiState }>("/api/analysis", {
         nodeId: measured.nodeId,
@@ -318,14 +311,15 @@ export function Workbench({ servConfigured, databaseConfigured, jevConfigured }:
         originalRunId: measured.originalRunId,
         challengedRunId: measured.challengedRunId,
       }, controller.signal);
-      if (requestId === jevRequestId.current) setJevState(data.analysis);
+      const next = settleJevAttempt(requestId, jevRequestId.current, data.analysis);
+      if (next) setJevState(next);
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
-      if (requestId !== jevRequestId.current) return;
       const issue = cause instanceof ApiRequestError
         ? { code: cause.code, reason: cause.message }
         : { code: "JEV_REQUEST_FAILED", reason: "Jev analysis could not be loaded." };
-      setJevState({ status: "failed", ...issue });
+      const next = failJevAttempt(requestId, jevRequestId.current, issue);
+      if (next) setJevState(next);
     }
   }
 

@@ -59,4 +59,13 @@ describe("Jev experiment analysis", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
     await expect(analyzeExperimentWithJev(comparison)).rejects.toMatchObject({ code: "JEV_TIMEOUT" });
   });
+
+  it("classifies malformed JSON and network unavailability without inventing analysis", async () => {
+    vi.stubEnv("OPENJEV_API_KEY", "test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    await expect(analyzeExperimentWithJev(comparison)).rejects.toMatchObject({ code: "INVALID_JEV_RESPONSE" });
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network unavailable")));
+    await expect(analyzeExperimentWithJev(comparison)).rejects.toMatchObject({ code: "JEV_UNREACHABLE" });
+  });
 });
