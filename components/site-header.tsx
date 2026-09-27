@@ -6,7 +6,6 @@ export function SiteHeader() {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="site-header">
         <Link className="brand" href="/" aria-label="Choiceproof home">
-          <span className="brand-mark" aria-hidden="true"><i /><i /></span>
           <span>CHOICEPROOF</span>
         </Link>
         <nav className="desktop-nav" aria-label="Primary navigation">

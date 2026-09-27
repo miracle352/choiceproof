@@ -53,7 +53,7 @@ export default async function Home() {
           provenance={heroProvenance}
         >
           <div className="landing-copy">
-            <h1 id="landing-title">One sentence.<br /><em>Two decisions.</em></h1>
+            <h1 id="landing-title">One sentence.<br /><span>Two decisions.</span></h1>
             <p className="landing-deck">Change one fact. See where SERV draws the line.</p>
             <div className="landing-actions">
               <Link className="primary-button" href="/chamber">Enter the Chamber <span aria-hidden="true">↗</span></Link>

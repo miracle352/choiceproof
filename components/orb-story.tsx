@@ -73,13 +73,15 @@ export function OrbStory({
           className="decision-orb"
           aria-label={`${stateLabel} comparison. ${originalFact} produced ${originalAnswer}. ${changedFact} produced ${challengedAnswer}.`}
         >
-          <div className="orb-stone" aria-hidden="true" />
           <div className="orb-camera" aria-hidden="true">
-            <div className="orb-poster orb-poster-left">
-              <Image src="/choiceproof-orb-poster.png" alt="" fill priority sizes="(max-width: 760px) 100vw, 58vw" />
-            </div>
-            <div className="orb-poster orb-poster-right">
-              <Image src="/choiceproof-orb-poster.png" alt="" fill priority sizes="(max-width: 760px) 100vw, 58vw" />
+            <div className="orb-poster">
+              <Image
+                src="/choiceproof-orb-hero.jpg"
+                alt=""
+                fill
+                priority
+                sizes="(max-width: 760px) 100vw, 72vw"
+              />
             </div>
             <span className="orb-seam" />
             <span className="orb-path orb-path-original" />
@@ -104,13 +106,15 @@ export function OrbStory({
           </div>
           <figcaption className="orb-provenance">
             <b>{stateLabel}</b>
+            <span>ONE FACT CHANGED</span>
             <span>{provenance}</span>
           </figcaption>
         </figure>
 
         <div className="orb-next-frame" aria-hidden="true">
-          <span>One controlled fact</span>
-          <strong>{changed ? "The boundary moved." : "The boundary held."}</strong>
+          <span>THE CHAMBER</span>
+          <strong>A fairer line for harder calls.</strong>
+          <p>The same decision. With one fact changed.<br />See how SERV responds, then decide what the evidence means.</p>
         </div>
       </div>
 
