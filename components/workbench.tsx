@@ -130,8 +130,8 @@ function DiffView({ before, after }: { before: string; after: string }) {
     added: total.added + (part.added ? Array.from(part.value).length : 0),
     removed: total.removed + (part.removed ? Array.from(part.value).length : 0),
   }), { added: 0, removed: 0 }), [changes]);
-  const removed = useMemo(() => changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No removed text", [changes]);
-  const added = useMemo(() => changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No added text", [changes]);
+  const removed = useMemo(() => changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text removed", [changes]);
+  const added = useMemo(() => changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text added", [changes]);
 
   return (
     <div className="diff-block">

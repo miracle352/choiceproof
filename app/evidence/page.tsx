@@ -21,8 +21,8 @@ export default async function EvidencePage() {
           {evidence.map((item) => {
             const changed = item.payload.original.selectedAnswer !== item.payload.challenged.selectedAnswer;
             const changes = diffWordsWithSpace(item.payload.originalInput, item.payload.challengeInput);
-            const removed = changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ");
-            const added = changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ");
+            const removed = changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text removed";
+            const added = changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text added";
             return <Link className="evidence-card" href={`/share/${item.id}`} key={item.id}>
               <div><span className="run-tag tag-recorded">RECORDED</span><h2>{item.payload.question}</h2><p>{item.payload.challengeKind.replaceAll("_", " ")} / published {new Date(item.createdAt).toLocaleDateString()}</p></div>
               <div className="evidence-fact"><small>ONE CHANGED FACT</small><p><del>{removed}</del><span aria-hidden="true">→</span><ins>{added}</ins></p></div>

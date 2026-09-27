@@ -14,8 +14,8 @@ type SplitLensProps = {
 function changedFragments(before: string, after: string) {
   const parts = diffWordsWithSpace(before, after);
   return {
-    before: parts.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No removed text",
-    after: parts.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No added text",
+    before: parts.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text removed",
+    after: parts.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text added",
   };
 }
 

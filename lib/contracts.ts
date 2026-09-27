@@ -135,7 +135,7 @@ export function validateDecisionRequest(value: unknown):
   if (question.length < 8 || question.length > MAX_QUESTION_LENGTH) {
     return {
       success: false,
-      message: `Decision question must be 8–${MAX_QUESTION_LENGTH} characters.`,
+      message: `Decision question must be 8 to ${MAX_QUESTION_LENGTH.toLocaleString()} characters.`,
     };
   }
 
@@ -152,7 +152,7 @@ export function validateDecisionRequest(value: unknown):
     if (!answer || answer.length > MAX_ANSWER_LENGTH) {
       return {
         success: false,
-        message: `Each allowed answer must be 1–${MAX_ANSWER_LENGTH} characters.`,
+        message: `Each allowed answer must be 1 to ${MAX_ANSWER_LENGTH} characters.`,
       };
     }
     answers.push(answer);
@@ -175,7 +175,7 @@ export function validateDecisionRequest(value: unknown):
   if (!input || input.length > MAX_INPUT_LENGTH) {
     return {
       success: false,
-      message: `Sample input must be 1–${MAX_INPUT_LENGTH.toLocaleString()} characters.`,
+      message: `Sample input must be 1 to ${MAX_INPUT_LENGTH.toLocaleString()} characters.`,
     };
   }
 

@@ -17,8 +17,8 @@ export function ComparisonPlate(props: ComparisonPlateProps) {
   const changes = diffWordsWithSpace(props.originalInput, props.challengeInput);
   const changed = props.originalAnswer !== props.challengedAnswer;
   const editSize = changes.reduce((total, part) => total + ((part.added || part.removed) ? Array.from(part.value).length : 0), 0);
-  const removed = changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No removed text";
-  const added = changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No added text";
+  const removed = changes.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text removed";
+  const added = changes.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ") || "No text added";
   return (
     <article className={`public-comparison ${changed ? "comparison-flipped" : "comparison-held"}`}>
       <header className="public-comparison-header">
