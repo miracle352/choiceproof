@@ -1,35 +1,19 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { diffWordsWithSpace } from "diff";
 import { ComparisonPlate } from "@/components/comparison-plate";
 import { LandingLiveExample } from "@/components/landing-live-example";
 import { OrbStory } from "@/components/orb-story";
 import { SiteFooter, SiteHeader } from "@/components/site-header";
 import { listPublishedResults } from "@/lib/db";
 import { REFUND_CHALLENGE, REFUND_EXAMPLE, REFUND_SAMPLE_ANSWERS } from "@/lib/example";
+import { controlledFacts, selectHomepageRecord } from "@/lib/homepage-evidence";
 import { isServConfigured } from "@/lib/serv";
-
-function controlledFacts(before: string, after: string) {
-  const parts = diffWordsWithSpace(before, after);
-  let original = parts.filter((part) => part.removed).map((part) => part.value.trim()).filter(Boolean).join(" ");
-  let changed = parts.filter((part) => part.added).map((part) => part.value.trim()).filter(Boolean).join(" ");
-  const lastChange = parts.reduce((index, part, partIndex) => part.added || part.removed ? partIndex : index, -1);
-  const followingWord = parts.slice(lastChange + 1).find((part) => !part.added && !part.removed)?.value.trim().split(/\s+/)[0];
-  if (/^\d+$/.test(original) && /^\d+$/.test(changed) && followingWord) {
-    original = `${original} ${followingWord}`;
-    changed = `${changed} ${followingWord}`;
-  }
-  return { original, changed };
-}
 
 export default async function Home() {
   await connection();
   const published = await listPublishedResults(12).catch(() => []);
-  const recorded = published[0] ?? null;
-  const heroRecord = published.find((item) => {
-    const fact = controlledFacts(item.payload.originalInput, item.payload.challengeInput);
-    return Boolean(fact.original && fact.changed && fact.original.length <= 32 && fact.changed.length <= 32);
-  }) ?? null;
+  const recorded = selectHomepageRecord(published);
+  const heroRecord = recorded;
   const hero = heroRecord?.payload;
   const heroOriginalInput = hero?.originalInput ?? REFUND_EXAMPLE.input;
   const heroChallengeInput = hero?.challengeInput ?? REFUND_CHALLENGE;
